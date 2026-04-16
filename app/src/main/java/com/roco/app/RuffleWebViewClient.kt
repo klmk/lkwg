@@ -56,22 +56,18 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             return serveRuffleAsset(path)
         }
 
-        // Only intercept main frame
-        if (!request.isForMainFrame) {
-            return null
+        // Intercept main frame HTML for Ruffle injection
+        if (request.isForMainFrame && isHtmlUrl(urlStr) && !injectedUrls.contains(urlStr)) {
+            return downloadAndInjectHtml(urlStr)
         }
 
-        // Only intercept HTML pages
-        if (!isHtmlUrl(urlStr)) {
-            return null
+        // Proxy all cross-origin requests to bypass CORS
+        // This is critical for Ruffle to load SWF and other resources
+        if (isCrossOrigin(urlStr)) {
+            return proxyRequest(request)
         }
 
-        // Avoid re-injection
-        if (injectedUrls.contains(urlStr)) {
-            return null
-        }
-
-        return downloadAndInjectHtml(urlStr)
+        return null
     }
 
     @SuppressLint("DiscouragedApi")
@@ -146,6 +142,86 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             return html.substring(0, headClose) + ruffleInjection + html.substring(headClose)
         }
         return ruffleInjection + html
+    }
+
+    private fun isCrossOrigin(url: String): Boolean {
+        try {
+            val uri = Uri.parse(url)
+            val host = uri.host ?: return false
+            // Proxy requests to resource domains that Ruffle needs
+            val resourceHosts = listOf(
+                "res.17roco.qq.com",
+                "web2.17roco.qq.com",
+                "17roco.qq.com",
+                "ossweb-img.qq.com",
+                "qzs.qq.com",
+                "pingjs.qq.com"
+            )
+            return resourceHosts.any { host == it || host.endsWith("." + it) }
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    @SuppressLint("DiscouragedApi")
+    private fun proxyRequest(request: WebResourceRequest): WebResourceResponse? {
+        val urlStr = request.url.toString()
+        return try {
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", Constants.DESKTOP_USER_AGENT)
+            conn.setRequestProperty("Accept", "*/*")
+            conn.setRequestProperty("Accept-Encoding", "identity")
+
+            // Set proper Referer for resource requests
+            if (urlStr.contains("res.17roco.qq.com")) {
+                conn.setRequestProperty("Referer", REFERER_FOR_RESOURCES)
+            } else if (urlStr.contains("17roco.qq.com")) {
+                conn.setRequestProperty("Referer", "https://17roco.qq.com/")
+            }
+
+            // Forward request headers
+            for ((key, value) in request.requestHeaders) {
+                if (key.equals("Range", ignoreCase = true)) {
+                    conn.setRequestProperty(key, value)
+                }
+            }
+
+            val responseCode = conn.responseCode
+
+            if (responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                responseCode == HttpURLConnection.HTTP_SEE_OTHER
+            ) {
+                val location = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (location != null) {
+                    return proxyRequest(WebResourceRequest.Builder()
+                        .setUrl(Uri.parse(location))
+                        .setRequestHeaders(request.requestHeaders)
+                        .build())
+                }
+            }
+
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "Proxy HTTP $responseCode for $urlStr")
+                conn.disconnect()
+                return null
+            }
+
+            val contentType = conn.contentType ?: "application/octet-stream"
+            val encoding = conn.contentEncoding
+            val mimeType = contentType.split(";")[0].trim()
+            val inputStream: InputStream = conn.inputStream
+
+            WebResourceResponse(mimeType, encoding, inputStream)
+        } catch (e: Exception) {
+            Log.e(TAG, "Proxy error for $urlStr", e)
+            null
+        }
     }
 
     private fun parseCharset(contentType: String): String? {
