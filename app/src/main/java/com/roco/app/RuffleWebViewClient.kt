@@ -92,9 +92,13 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             return proxyUrl(realUrl)
         }
 
-        // Intercept main frame HTML for Ruffle injection
-        if (request.isForMainFrame && isHtmlUrl(urlStr) && !injectedUrls.contains(urlStr)) {
-            return downloadAndInjectHtml(urlStr)
+        // Intercept ALL HTML pages from 17roco domains for Ruffle injection
+        // This includes iframes and subframes (e.g., web2.17roco.qq.com/fcgi-bin/login3)
+        if (isRocoDomain(urlStr) && !injectedUrls.contains(urlStr)) {
+            // Try to intercept as HTML (download and inject)
+            // We intercept both main frame and subframes
+            val response = downloadAndInjectHtml(urlStr)
+            if (response != null) return response
         }
 
         // Proxy all cross-origin resource requests to bypass CORS
@@ -150,7 +154,16 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 return null
             }
 
-            val contentType = conn.contentType ?: "text/html"
+            val contentType = conn.contentType ?: ""
+            val mimeType = contentType.split(";")[0].trim().lowercase()
+
+            // Only inject into HTML responses
+            if (mimeType != "text/html" && mimeType != "application/xhtml+xml" && !urlStr.contains(".html") && !urlStr.contains(".htm") && !urlStr.contains("fcgi-bin")) {
+                conn.disconnect()
+                Log.d(TAG, "Skipping non-HTML injection for $urlStr (type=$mimeType)")
+                return null
+            }
+
             var charset = parseCharset(contentType) ?: "gb2312"
 
             val htmlBytes = conn.inputStream.readBytes()
@@ -167,6 +180,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
             val modifiedHtml = injectRuffleScripts(finalHtml)
             injectedUrls.add(urlStr)
+            Log.d(TAG, "Injected Ruffle into $urlStr (${htmlBytes.size} bytes)")
 
             WebResourceResponse(
                 "text/html", "UTF-8",
@@ -190,16 +204,26 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
         try {
             val uri = Uri.parse(url)
             val host = uri.host ?: return false
-            // Proxy requests to resource domains that Ruffle needs
             val resourceHosts = listOf(
                 "res.17roco.qq.com",
                 "web2.17roco.qq.com",
-                "17roco.qq.com",
                 "ossweb-img.qq.com",
                 "qzs.qq.com",
                 "pingjs.qq.com"
             )
             return resourceHosts.any { host == it || host.endsWith("." + it) }
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    private fun isRocoDomain(url: String): Boolean {
+        try {
+            val uri = Uri.parse(url)
+            val host = uri.host ?: return false
+            return host == "17roco.qq.com" ||
+                   host == "web2.17roco.qq.com" ||
+                   host.endsWith(".17roco.qq.com")
         } catch (e: Exception) {
             return false
         }
