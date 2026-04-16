@@ -386,14 +386,16 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                         var objects = document.querySelectorAll('object, embed');
                         if (objects.length === 0) {
                             // No Flash tags found - the page likely uses document.write
-                            // Manually create a Ruffle player and load the main SWF
+                            // Manually create a Ruffle player and load the main SWF via proxy
                             var player = ruffle.createPlayer();
                             player.style.width = '960px';
                             player.style.height = '560px';
                             var container = document.getElementById('flashcontent') || document.body;
                             container.appendChild(player);
-                            player.load('https://res.17roco.qq.com/swf/ROCO-Z8.swf');
-                            console.log('Ruffle: manually loaded SWF');
+                            // Use proxy URL to avoid CORS issues
+                            var swfUrl = '/__proxy/' + encodeURIComponent('https://res.17roco.qq.com/swf/ROCO-Z8.swf');
+                            player.load(swfUrl);
+                            console.log('Ruffle: manually loaded SWF via proxy');
                         } else {
                             ruffle.autoEnable();
                             console.log('Ruffle: autoEnable on ' + objects.length + ' elements');
