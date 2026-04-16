@@ -2,7 +2,9 @@ package com.roco.app
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.util.Log
 import android.view.View
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -10,14 +12,18 @@ import android.webkit.WebView
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import java.io.File
+import java.io.FileWriter
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var urlText: TextView
     private lateinit var progressBar: ProgressBar
+    private val logBuffer = StringBuilder()
 
     companion object {
+        private const val TAG = "RocoApp"
         private const val TARGET_URL = "https://17roco.qq.com/default.html"
     }
 
@@ -43,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         // Ruffle injection client
         webView.webViewClient = RuffleWebViewClient(this)
 
-        // Progress bar
+        // Progress bar + Console logging
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
@@ -54,6 +60,22 @@ class MainActivity : AppCompatActivity() {
                     progressBar.visibility = View.GONE
                 }
                 urlText.text = view?.url ?: TARGET_URL
+            }
+
+            override fun onConsoleMessage(message: ConsoleMessage?): Boolean {
+                if (message != null) {
+                    val line = "[${message.sourceId()}:${message.lineNumber()}] ${message.level()}: ${message.message()}"
+                    Log.d(TAG, "CONSOLE: $line")
+                    logBuffer.append(line).append("\n")
+                    // Also write to file for ADB access
+                    try {
+                        val logFile = File(filesDir, "webconsole.log")
+                        FileWriter(logFile, true).use { it.write(line + "\n") }
+                    } catch (e: Exception) {
+                        // ignore
+                    }
+                }
+                return true
             }
         }
 
