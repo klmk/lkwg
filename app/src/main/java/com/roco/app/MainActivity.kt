@@ -20,7 +20,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var urlText: TextView
     private lateinit var progressBar: ProgressBar
-    private val logBuffer = StringBuilder()
 
     companion object {
         private const val TAG = "RocoApp"
@@ -64,16 +63,17 @@ class MainActivity : AppCompatActivity() {
 
             override fun onConsoleMessage(message: ConsoleMessage?): Boolean {
                 if (message != null) {
-                    val line = "[${message.sourceId()}:${message.lineNumber()}] ${message.level()}: ${message.message()}"
-                    Log.d(TAG, "CONSOLE: $line")
-                    logBuffer.append(line).append("\n")
-                    // Also write to file for ADB access
+                    val level = message.message()
+                    val source = message.sourceId()
+                    val lineNum = message.lineNumber()
+                    val logLine = "[$source:$lineNum] $level"
+                    Log.d(TAG, "CONSOLE: $logLine")
                     try {
                         val logFile = File(filesDir, "webconsole.log")
-                        FileWriter(logFile, true).use { it.write(line + "\n") }
-                    } catch (e: Exception) {
-                        // ignore
-                    }
+                        FileWriter(logFile, true).use { writer ->
+                            writer.write(logLine + "\n")
+                        }
+                    } catch (_: Exception) {}
                 }
                 return true
             }
