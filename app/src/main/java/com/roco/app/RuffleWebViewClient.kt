@@ -34,9 +34,17 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 "  var PROXY_PREFIX = '/__proxy/';\n" +
                 "  var TARGET_DOMAINS = ['res.17roco.qq.com','web2.17roco.qq.com','17roco.qq.com','ossweb-img.qq.com','qzs.qq.com','pingjs.qq.com'];\n" +
                 "  function shouldProxy(url) {\n" +
-                "    try { var h = new URL(url, location.href).hostname; return TARGET_DOMAINS.some(function(d){return h===d||h.endsWith('.'+d);}); } catch(e){return false;}\n" +
+                "    try {\n" +
+                "      // Handle protocol-relative URLs like //res.17roco.qq.com/...\n" +
+                "      if (url.indexOf('//') === 0) url = location.protocol + url;\n" +
+                "      var h = new URL(url, location.href).hostname;\n" +
+                "      return TARGET_DOMAINS.some(function(d){return h===d||h.endsWith('.'+d);});\n" +
+                "    } catch(e){return false;}\n" +
                 "  }\n" +
-                "  function toProxy(url) { return PROXY_PREFIX + encodeURIComponent(url); }\n" +
+                "  function toProxy(url) {\n" +
+                "    if (url.indexOf('//') === 0) url = location.protocol + url;\n" +
+                "    return PROXY_PREFIX + encodeURIComponent(url);\n" +
+                "  }\n" +
                 "  var origFetch = window.fetch;\n" +
                 "  window.fetch = function(input, init) {\n" +
                 "    var url = typeof input === 'string' ? input : (input instanceof Request ? input.url : String(input));\n" +
@@ -80,6 +88,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
         if (path.startsWith("/__proxy/")) {
             val encodedUrl = path.substring("/__proxy/".length)
             val realUrl = java.net.URLDecoder.decode(encodedUrl, "UTF-8")
+            Log.d(TAG, "Proxy request: $realUrl from ${request.url.host}")
             return proxyUrl(realUrl)
         }
 
@@ -387,37 +396,32 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
     override fun onPageFinished(view: WebView?, url: String?) {
         Log.d(TAG, "Page finished: $url")
         if (url == null) return
-        // After page loads, inject Ruffle player to replace Flash content
-        // The page uses document.write() to create <object> tags which Ruffle should handle
-        // But we also manually trigger Ruffle to ensure it activates
+        // Only inject on 17roco.qq.com pages, not on login/oauth redirects
+        if (!url.contains("17roco.qq.com")) return
+        // Don't re-inject if page already has Ruffle players
         view?.evaluateJavascript("""
             (function() {
                 try {
-                    if (window.RufflePlayer) {
-                        var ruffle = window.RufflePlayer.newest();
-                        // Find any existing object/embed tags and let Ruffle handle them
-                        var objects = document.querySelectorAll('object, embed');
-                        if (objects.length === 0) {
-                            // No Flash tags found - the page likely uses document.write
-                            // Manually create a Ruffle player and load the main SWF via proxy
-                            var player = ruffle.createPlayer();
-                            player.style.width = '960px';
-                            player.style.height = '560px';
-                            var container = document.getElementById('flashcontent') || document.body;
-                            container.appendChild(player);
-                            // Use proxy URL to avoid CORS issues
-                            var swfUrl = '/__proxy/' + encodeURIComponent('https://res.17roco.qq.com/swf/ROCO-Z8.swf');
-                            player.load(swfUrl);
-                            console.log('Ruffle: manually loaded SWF via proxy');
-                        } else {
-                            ruffle.autoEnable();
-                            console.log('Ruffle: autoEnable on ' + objects.length + ' elements');
-                        }
-                    } else {
+                    if (!window.RufflePlayer) {
                         console.error('Ruffle: RufflePlayer not available');
+                        return;
+                    }
+                    // Check if Ruffle already has active players
+                    var existingPlayers = document.querySelectorAll('ruffle-player, ruffle-embed, [data-ruffle-player]');
+                    if (existingPlayers.length > 0) {
+                        console.log('Ruffle: ' + existingPlayers.length + ' players already exist, skipping');
+                        return;
+                    }
+                    var ruffle = window.RufflePlayer.newest();
+                    var objects = document.querySelectorAll('object, embed');
+                    if (objects.length > 0) {
+                        ruffle.autoEnable();
+                        console.log('Ruffle: autoEnable on ' + objects.length + ' Flash elements');
+                    } else {
+                        console.log('Ruffle: no Flash elements found, page may use document.write');
                     }
                 } catch(e) {
-                    console.error('Ruffle error: ' + e.message);
+                    console.error('Ruffle onPageFinished error: ' + e.message);
                 }
             })();
         """.trimIndent(), null)
