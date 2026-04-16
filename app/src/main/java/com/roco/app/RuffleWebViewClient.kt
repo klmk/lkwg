@@ -36,7 +36,12 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 "window.RufflePlayer.config = {\n" +
                 "  \"publicPath\": \"/__ruffle/\",\n" +
                 "  \"polyfills\": true,\n" +
-                "  \"allowScriptAccess\": true\n" +
+                "  \"allowScriptAccess\": true,\n" +
+                "  \"maxExecutionDuration\": { \"seconds\": 300 },\n" +
+                "  \"letterbox\": \"off\",\n" +
+                "  \"backgroundColor\": null,\n" +
+                "  \"warnOnUnsupportedContent\": false,\n" +
+                "  \"upgradeToHttps\": true\n" +
                 "};\n" +
                 "</script>\n"
         }
