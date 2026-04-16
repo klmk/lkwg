@@ -25,10 +25,13 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Rust toolchain
-        run: |
-          rustup show
-          rustup target add ${{ matrix.rust-target }}
+      - name: Install Rust toolchain 1.92.0
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Verify Rust target
+        run: rustup target list --installed && rustup show
 
       - name: Cache Cargo output
         uses: Swatinem/rust-cache@v2
