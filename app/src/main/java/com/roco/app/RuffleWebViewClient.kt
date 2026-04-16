@@ -69,9 +69,11 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
         val urlStr = request.url.toString()
         val path = request.url.path ?: ""
 
-        // Serve Ruffle assets from local
-        if (path.startsWith(RUFFLE_URL_PREFIX)) {
-            return serveRuffleAsset(path)
+        // Serve Ruffle assets from local - match /__ruffle/ on ANY domain
+        // This handles cross-origin Ruffle loading (e.g., web2.17roco.qq.com loading from 17roco.qq.com/__ruffle/)
+        if (path.contains("/__ruffle/")) {
+            val rufflePath = path.substring(path.indexOf("/__ruffle/"))
+            return serveRuffleAsset(rufflePath)
         }
 
         // Handle proxy requests from JS fetch/XHR interception
@@ -100,7 +102,14 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
         return try {
             val inputStream: InputStream = context.assets.open(assetPath)
             val mimeType = guessMimeType(assetPath)
-            WebResourceResponse(mimeType, "UTF-8", inputStream)
+            val response = WebResourceResponse(mimeType, "UTF-8", inputStream)
+            // Add CORS headers for cross-origin Ruffle loading
+            val headers = mutableMapOf<String, String>()
+            headers["Access-Control-Allow-Origin"] = "*"
+            headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            headers["Access-Control-Allow-Headers"] = "*"
+            response.responseHeaders = headers
+            response
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load Ruffle asset: $assetPath", e)
             WebResourceResponse(
@@ -193,7 +202,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             val url = URL(realUrl)
             val conn = url.openConnection() as HttpURLConnection
             conn.connectTimeout = 15000
-            conn.readTimeout = 30000
+            conn.readTimeout = 60000
             conn.instanceFollowRedirects = true
             conn.setRequestProperty("User-Agent", Constants.DESKTOP_USER_AGENT)
             conn.setRequestProperty("Accept", "*/*")
@@ -205,7 +214,6 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 conn.setRequestProperty("Referer", "https://17roco.qq.com/")
             }
 
-            // Add CORS headers so the browser accepts the response
             val responseCode = conn.responseCode
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 Log.w(TAG, "Proxy HTTP $responseCode for $realUrl")
@@ -214,16 +222,21 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                     ByteArrayInputStream("HTTP $responseCode".toByteArray()))
             }
 
+            // Read entire response into memory to avoid stream closure issues
+            val data = conn.inputStream.readBytes()
+            conn.disconnect()
+
             val contentType = conn.contentType ?: "application/octet-stream"
             val mimeType = contentType.split(";")[0].trim()
-            val encoding = conn.contentEncoding
 
-            // Add CORS headers to the response
-            val response = WebResourceResponse(mimeType, encoding, conn.inputStream)
+            Log.d(TAG, "Proxied $realUrl: ${data.size} bytes, type=$mimeType")
+
+            val response = WebResourceResponse(mimeType, null, ByteArrayInputStream(data))
             val headers = mutableMapOf<String, String>()
             headers["Access-Control-Allow-Origin"] = "*"
             headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             headers["Access-Control-Allow-Headers"] = "*"
+            headers["Content-Length"] = data.size.toString()
             response.responseHeaders = headers
             response
         } catch (e: Exception) {
