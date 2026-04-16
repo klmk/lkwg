@@ -1,3 +1,0 @@
-[submodule "ruffle-android"]
-	path = ruffle-android
-	url = https://github.com/ruffle-rs/ruffle-android.git

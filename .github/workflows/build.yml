@@ -1,91 +1,16 @@
-name: Build Ruffle Android APK
+name: Build RocoApp APK
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-  NDK_VERSION: "r27"
-  CARGO_NDK_VERSION: "4.1.2"
-
 jobs:
-  build-native-libs:
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        include:
-          - android-abi: arm64-v8a
-            rust-target: aarch64-linux-android
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust toolchain 1.92.0
-        uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          targets: ${{ matrix.rust-target }}
-
-      - name: Verify Rust target
-        run: rustup target list --installed && rustup show
-
-      - name: Cache Cargo output
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ${{ matrix.rust-target }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk@${{ env.CARGO_NDK_VERSION }} --locked
-
-      - name: Clean up NDKs
-        run: |
-          rm -r $ANDROID_NDK_HOME
-          rm -r $ANDROID_NDK_LATEST_HOME
-
-      - name: Set up NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: ${{ env.NDK_VERSION }}
-          link-to-sdk: true
-
-      - name: Build native libs
-        working-directory: ruffle-android
-        run: |
-          unset ANDROID_SDK_ROOT
-          cargo ndk --target ${{ matrix.android-abi }} --platform 26 -o jniLibs build --release --features jpegxr
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-lib-${{ matrix.android-abi }}
-          path: ruffle-android/jniLibs
-
-  build-apks:
-    needs: build-native-libs
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: native-lib-arm64-v8a
-          path: native-libs
-
-      - name: Copy native libs
-        run: |
-          mkdir -p ruffle-android/app/src/main/jniLibs
-          cp -r native-libs/* ruffle-android/app/src/main/jniLibs/
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -93,49 +18,25 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Clean up NDKs
-        run: |
-          rm -r $ANDROID_NDK_HOME
-          rm -r $ANDROID_NDK_LATEST_HOME
-
-      - name: Set up NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: ${{ env.NDK_VERSION }}
-          link-to-sdk: true
-
       - name: Generate debug keystore
         run: |
-          keytool -genkeypair -v -keystore ruffle-android/app/androidkey.jks -alias dummy_alias \
+          keytool -genkeypair -v -keystore app/androidkey.jks -alias dummy_alias \
             -storepass dummy_pass -keypass dummy_pass -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=example, OU=example, O=example, L=example, S=example, C=example"
 
-      - name: Build debug APK (arm64 only)
-        working-directory: ruffle-android
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
-          GITHUB_ACTIONS: "true"
+      - name: Build debug APK
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "ndk.dir=${{ steps.setup-ndk.outputs.ndk-path }}" >> local.properties
           chmod +x gradlew
-          ./gradlew :app:assembleDebug -PABI_FILTERS=arm64-v8a --no-daemon
+          ./gradlew :app:assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ruffle-android-arm64-debug
-          path: ruffle-android/app/build/outputs/apk/debug/*.apk
+          name: roco-app-debug
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 7
-
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            ruffle-android/app/build/outputs/

@@ -1,0 +1,12 @@
+*.map
+ruffle-selfhosted/
+ruffle.zip
+.DS_Store
+local.properties
+*.iml
+.idea/
+.gradle/
+build/
+app/build/
+*.apk
+*.jks
