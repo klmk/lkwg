@@ -28,7 +28,29 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
     private val ruffleInjection: String
         get() {
-            return "<script src=\"/__ruffle/ruffle.js\"></script>\n" +
+            return "<script>\n" +
+                "// Intercept fetch to bypass CORS\n" +
+                "(function() {\n" +
+                "  var PROXY_PREFIX = '/__proxy/';\n" +
+                "  var TARGET_DOMAINS = ['res.17roco.qq.com','web2.17roco.qq.com','17roco.qq.com','ossweb-img.qq.com','qzs.qq.com','pingjs.qq.com'];\n" +
+                "  function shouldProxy(url) {\n" +
+                "    try { var h = new URL(url, location.href).hostname; return TARGET_DOMAINS.some(function(d){return h===d||h.endsWith('.'+d);}); } catch(e){return false;}\n" +
+                "  }\n" +
+                "  function toProxy(url) { return PROXY_PREFIX + encodeURIComponent(url); }\n" +
+                "  var origFetch = window.fetch;\n" +
+                "  window.fetch = function(input, init) {\n" +
+                "    var url = typeof input === 'string' ? input : (input instanceof Request ? input.url : String(input));\n" +
+                "    if (shouldProxy(url)) { url = toProxy(url); if (typeof input === 'string') input = url; else if (input instanceof Request) input = new Request(url, input); }\n" +
+                "    return origFetch.call(this, input, init);\n" +
+                "  };\n" +
+                "  var origOpen = XMLHttpRequest.prototype.open;\n" +
+                "  XMLHttpRequest.prototype.open = function(method, url) {\n" +
+                "    if (shouldProxy(url)) url = toProxy(url);\n" +
+                "    return origOpen.call(this, method, url);\n" +
+                "  };\n" +
+                "})();\n" +
+                "</script>\n" +
+                "<script src=\"/__ruffle/ruffle.js\"></script>\n" +
                 "<script>\n" +
                 "window.addEventListener(\"DOMContentLoaded\", function() {\n" +
                 "  if (window.RufflePlayer) {\n" +
@@ -56,13 +78,19 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             return serveRuffleAsset(path)
         }
 
+        // Handle proxy requests from JS fetch/XHR interception
+        if (path.startsWith("/__proxy/")) {
+            val encodedUrl = path.substring("/__proxy/".length)
+            val realUrl = java.net.URLDecoder.decode(encodedUrl, "UTF-8")
+            return proxyUrl(realUrl)
+        }
+
         // Intercept main frame HTML for Ruffle injection
         if (request.isForMainFrame && isHtmlUrl(urlStr) && !injectedUrls.contains(urlStr)) {
             return downloadAndInjectHtml(urlStr)
         }
 
-        // Proxy all cross-origin requests to bypass CORS
-        // This is critical for Ruffle to load SWF and other resources
+        // Proxy all cross-origin resource requests to bypass CORS
         if (isCrossOrigin(urlStr)) {
             return proxyRequest(request)
         }
@@ -160,6 +188,51 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             return resourceHosts.any { host == it || host.endsWith("." + it) }
         } catch (e: Exception) {
             return false
+        }
+    }
+
+    @SuppressLint("DiscouragedApi")
+    private fun proxyUrl(realUrl: String): WebResourceResponse? {
+        return try {
+            val url = URL(realUrl)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", Constants.DESKTOP_USER_AGENT)
+            conn.setRequestProperty("Accept", "*/*")
+            conn.setRequestProperty("Accept-Encoding", "identity")
+
+            if (realUrl.contains("res.17roco.qq.com")) {
+                conn.setRequestProperty("Referer", REFERER_FOR_RESOURCES)
+            } else if (realUrl.contains("17roco.qq.com")) {
+                conn.setRequestProperty("Referer", "https://17roco.qq.com/")
+            }
+
+            // Add CORS headers so the browser accepts the response
+            val responseCode = conn.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "Proxy HTTP $responseCode for $realUrl")
+                conn.disconnect()
+                return WebResourceResponse("text/plain", "UTF-8",
+                    ByteArrayInputStream("HTTP $responseCode".toByteArray()))
+            }
+
+            val contentType = conn.contentType ?: "application/octet-stream"
+            val mimeType = contentType.split(";")[0].trim()
+            val encoding = conn.contentEncoding
+
+            // Add CORS headers to the response
+            val response = WebResourceResponse(mimeType, encoding, conn.inputStream)
+            val headers = mutableMapOf<String, String>()
+            headers["Access-Control-Allow-Origin"] = "*"
+            headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            headers["Access-Control-Allow-Headers"] = "*"
+            response.responseHeaders = headers
+            response
+        } catch (e: Exception) {
+            Log.e(TAG, "Proxy error for $realUrl", e)
+            null
         }
     }
 
