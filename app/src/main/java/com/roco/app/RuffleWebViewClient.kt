@@ -29,7 +29,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
     private val ruffleInjection: String
         get() {
             return "<script>\n" +
-                "// Intercept fetch to bypass CORS\n" +
+                "// Intercept fetch/XHR to bypass CORS\n" +
                 "(function() {\n" +
                 "  var PROXY_PREFIX = '/__proxy/';\n" +
                 "  var TARGET_DOMAINS = ['res.17roco.qq.com','web2.17roco.qq.com','17roco.qq.com','ossweb-img.qq.com','qzs.qq.com','pingjs.qq.com'];\n" +
@@ -52,16 +52,12 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 "</script>\n" +
                 "<script src=\"/__ruffle/ruffle.js\"></script>\n" +
                 "<script>\n" +
-                "window.addEventListener(\"DOMContentLoaded\", function() {\n" +
-                "  if (window.RufflePlayer) {\n" +
-                "    window.RufflePlayer.config = {\n" +
-                "      \"publicPath\": \"/__ruffle/\",\n" +
-                "      \"polyfills\": true,\n" +
-                "      \"allowScriptAccess\": true\n" +
-                "    };\n" +
-                "    window.RufflePlayer.newest().autoEnable();\n" +
-                "  }\n" +
-                "});\n" +
+                "window.RufflePlayer = window.RufflePlayer || {};\n" +
+                "window.RufflePlayer.config = {\n" +
+                "  \"publicPath\": \"/__ruffle/\",\n" +
+                "  \"polyfills\": true,\n" +
+                "  \"allowScriptAccess\": true\n" +
+                "};\n" +
                 "</script>\n"
         }
 
@@ -377,6 +373,39 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
     override fun onPageFinished(view: WebView?, url: String?) {
         Log.d(TAG, "Page finished: $url")
+        if (url == null) return
+        // After page loads, inject Ruffle player to replace Flash content
+        // The page uses document.write() to create <object> tags which Ruffle should handle
+        // But we also manually trigger Ruffle to ensure it activates
+        view?.evaluateJavascript("""
+            (function() {
+                try {
+                    if (window.RufflePlayer) {
+                        var ruffle = window.RufflePlayer.newest();
+                        // Find any existing object/embed tags and let Ruffle handle them
+                        var objects = document.querySelectorAll('object, embed');
+                        if (objects.length === 0) {
+                            // No Flash tags found - the page likely uses document.write
+                            // Manually create a Ruffle player and load the main SWF
+                            var player = ruffle.createPlayer();
+                            player.style.width = '960px';
+                            player.style.height = '560px';
+                            var container = document.getElementById('flashcontent') || document.body;
+                            container.appendChild(player);
+                            player.load('https://res.17roco.qq.com/swf/ROCO-Z8.swf');
+                            console.log('Ruffle: manually loaded SWF');
+                        } else {
+                            ruffle.autoEnable();
+                            console.log('Ruffle: autoEnable on ' + objects.length + ' elements');
+                        }
+                    } else {
+                        console.error('Ruffle: RufflePlayer not available');
+                    }
+                } catch(e) {
+                    console.error('Ruffle error: ' + e.message);
+                }
+            })();
+        """.trimIndent(), null)
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
