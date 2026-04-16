@@ -199,10 +199,27 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 val location = conn.getHeaderField("Location")
                 conn.disconnect()
                 if (location != null) {
-                    return proxyRequest(WebResourceRequest.Builder()
-                        .setUrl(Uri.parse(location))
-                        .setRequestHeaders(request.requestHeaders)
-                        .build())
+                    // Follow redirect by making a new request
+                    return try {
+                        val redirectUrl = URL(location)
+                        val redirectConn = redirectUrl.openConnection() as HttpURLConnection
+                        redirectConn.connectTimeout = 15000
+                        redirectConn.readTimeout = 15000
+                        redirectConn.instanceFollowRedirects = true
+                        redirectConn.setRequestProperty("User-Agent", Constants.DESKTOP_USER_AGENT)
+                        redirectConn.setRequestProperty("Accept", "*/*")
+                        redirectConn.setRequestProperty("Accept-Encoding", "identity")
+                        if (location.contains("res.17roco.qq.com")) {
+                            redirectConn.setRequestProperty("Referer", REFERER_FOR_RESOURCES)
+                        }
+                        val ct = redirectConn.contentType ?: "application/octet-stream"
+                        val enc = redirectConn.contentEncoding
+                        val mt = ct.split(";")[0].trim()
+                        WebResourceResponse(mt, enc, redirectConn.inputStream)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Redirect proxy error for $location", e)
+                        null
+                    }
                 }
             }
 
