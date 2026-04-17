@@ -26,8 +26,9 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
     private val injectedUrls = mutableSetOf<String>()
 
-    // Ruffle injection script - NO fetch/XHR interception!
-    // We proxy at the shouldInterceptRequest level instead, so SWF sees original URLs
+    // Ruffle injection script
+    // Uses urlRewriteRules to redirect SWF internal requests through /__proxy/
+    // so shouldInterceptRequest can proxy them (bypasses CORS + keeps original URL for SWF)
     private val ruffleInjection: String
         get() {
             return "<script src=\"/__ruffle/ruffle.js\"></script>\n" +
@@ -41,7 +42,13 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 "  \"letterbox\": \"off\",\n" +
                 "  \"backgroundColor\": null,\n" +
                 "  \"warnOnUnsupportedContent\": false,\n" +
-                "  \"upgradeToHttps\": true\n" +
+                "  \"upgradeToHttps\": true,\n" +
+                "  \"logLevel\": \"Debug\",\n" +
+                "  \"credentialAllowList\": [\"https://res.17roco.qq.com\", \"https://web2.17roco.qq.com\", \"https://17roco.qq.com\"],\n" +
+                "  \"urlRewriteRules\": [\n" +
+                "    [\"^//res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"],\n" +
+                "    [\"^https://res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"]\n" +
+                "  ]\n" +
                 "};\n" +
                 "</script>\n"
         }
@@ -60,15 +67,21 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             return serveRuffleAsset(rufflePath)
         }
 
-        // 2. Intercept ALL HTML from 17roco domains for Ruffle injection
+        // 2. Handle /__proxy/ requests (rewritten by Ruffle urlRewriteRules)
+        if (path.startsWith("/__proxy/")) {
+            val encodedUrl = path.substring("/__proxy/".length)
+            val realUrl = java.net.URLDecoder.decode(encodedUrl, "UTF-8")
+            Log.d(TAG, "Proxy request: $realUrl")
+            return proxyRequest(realUrl)
+        }
+
+        // 3. Intercept ALL HTML from 17roco domains for Ruffle injection
         if (isRocoDomain(urlStr) && !injectedUrls.contains(urlStr)) {
             val response = downloadAndInjectHtml(urlStr)
             if (response != null) return response
         }
 
-        // 3. Proxy ALL cross-origin resource requests at network level
-        //    This bypasses CORS entirely - the browser never sees the cross-origin request
-        //    SWF's checkDomain() sees the original URL, so security checks pass
+        // 4. Proxy ALL cross-origin resource requests at network level
         if (isResourceDomain(urlStr)) {
             return proxyRequest(urlStr)
         }
