@@ -142,19 +142,11 @@ class MainActivity : AppCompatActivity() {
                         }
                     } catch (_: Exception) {}
 
-                    // Detect Ruffle crash and auto-reload
+                    // Detect Ruffle crash - log it but don't auto-reload
+                    // (reload loses game state and goes back to login page)
                     if (level.contains("unreachable") && message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
-                        if (reloadCount < MAX_RELOADS) {
-                            reloadCount++
-                            Log.w(TAG, "Ruffle unreachable error detected, reload #$reloadCount in 2s...")
-                            addDebugLine("⚠️ Ruffle crash #$reloadCount, reloading in 2s...")
-                            handler.postDelayed({
-                                webView.reload()
-                            }, 2000)
-                        } else {
-                            Log.w(TAG, "Ruffle crashed $MAX_RELOADS times, giving up")
-                            addDebugLine("❌ Ruffle crashed $MAX_RELOADS times, stopped reloading")
-                        }
+                        Log.w(TAG, "Ruffle unreachable error detected (known Ruffle bug)")
+                        addDebugLine("⚠️ Ruffle crash: unreachable (known bug, see github.com/ruffle-rs/ruffle/issues/20990)")
                     }
                 }
                 return true
