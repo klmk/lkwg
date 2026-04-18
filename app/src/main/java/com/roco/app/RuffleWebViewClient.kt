@@ -43,7 +43,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "  \"publicPath\": \"/__ruffle/\",\n" +
                 "  \"polyfills\": true,\n" +
                 "  \"allowScriptAccess\": true,\n" +
-                "  \"maxExecutionDuration\": 3600,\n" +
+                "  \"maxExecutionDuration\": Infinity,\n" +
                 "  \"letterbox\": \"off\",\n" +
                 "  \"backgroundColor\": null,\n" +
                 "  \"warnOnUnsupportedContent\": false,\n" +
@@ -62,6 +62,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "    {\"host\": \"172.25.40.122\", \"port\": 9000, \"proxyUrl\": \"ws://127.0.0.1:19001\"}\n" +
                 "  ]\n" +
                 "};\n" +
+                "console.log('[ROCO-CONFIG] maxExecutionDuration=' + window.RufflePlayer.config.maxExecutionDuration);\n" +
                 "</script>\n"
         }
 
