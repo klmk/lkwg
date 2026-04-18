@@ -13,6 +13,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.os.Build
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.ScrollView
