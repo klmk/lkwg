@@ -9,6 +9,7 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -75,12 +76,14 @@ class SocketProxyServer(private val port: Int) : WebSocketServer(InetSocketAddre
         Log.d(TAG, "WebSocket text message (ignored): ${message?.take(100)}")
     }
 
-    override fun onMessage(conn: WebSocket?, message: ByteArray?) {
-        if (message == null) return
+    override fun onMessage(conn: WebSocket?, message: ByteBuffer?) {
+        if (message == null || conn == null) return
         val bridge = connections.find { it.ws == conn }
         if (bridge != null) {
             try {
-                bridge.tcpOutputStream.write(message)
+                val bytes = ByteArray(message.remaining())
+                message.get(bytes)
+                bridge.tcpOutputStream.write(bytes)
                 bridge.tcpOutputStream.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to write to TCP: ${e.message}")
