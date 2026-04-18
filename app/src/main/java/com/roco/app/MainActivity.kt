@@ -35,6 +35,8 @@ class MainActivity : AppCompatActivity() {
     private var socketProxies = mutableListOf<SocketProxyServer>()
     private val debugLines = mutableListOf<String>()
     private val handler = Handler(Looper.getMainLooper())
+    private var reloadCount = 0
+    private val MAX_RELOADS = 3
 
     companion object {
         private const val TAG = "RocoApp"
@@ -129,7 +131,6 @@ class MainActivity : AppCompatActivity() {
                 if (message != null) {
                     val level = message.message()
                     val source = message.sourceId()
-                    val lineNum = message.lineNumber()
                     val logLine = "[${message.messageLevel()}] $level"
                     Log.d(TAG, "CONSOLE: $logLine")
                     addDebugLine(logLine)
@@ -140,6 +141,21 @@ class MainActivity : AppCompatActivity() {
                             writer.write("[${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())}] $logLine\n")
                         }
                     } catch (_: Exception) {}
+
+                    // Detect Ruffle crash and auto-reload
+                    if (level.contains("unreachable") && message.messageLevel() == ConsoleMessage.Level.ERROR) {
+                        if (reloadCount < MAX_RELOADS) {
+                            reloadCount++
+                            Log.w(TAG, "Ruffle unreachable error detected, reload #$reloadCount in 2s...")
+                            addDebugLine("⚠️ Ruffle crash #$reloadCount, reloading in 2s...")
+                            handler.postDelayed({
+                                webView.reload()
+                            }, 2000)
+                        } else {
+                            Log.w(TAG, "Ruffle crashed $MAX_RELOADS times, giving up")
+                            addDebugLine("❌ Ruffle crashed $MAX_RELOADS times, stopped reloading")
+                        }
+                    }
                 }
                 return true
             }
