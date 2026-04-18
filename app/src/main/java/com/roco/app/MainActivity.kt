@@ -84,17 +84,22 @@ class MainActivity : AppCompatActivity() {
 
         // Start socket proxy FIRST (on background thread to avoid blocking UI)
         Thread {
+            Log.d(TAG, "SocketProxy thread started")
             for ((listenPort, targetHost, targetPort) in PROXY_ROUTES) {
                 try {
+                    Log.d(TAG, "Starting proxy :$listenPort -> $targetHost:$targetPort")
                     val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
                     proxy.isReuseAddr = true
                     proxy.start()
                     socketProxies.add(proxy)
+                    Log.d(TAG, "Proxy :$listenPort started successfully")
                     handler.post { addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort started") }
                 } catch (e: Exception) {
+                    Log.e(TAG, "Proxy :$listenPort FAILED", e)
                     handler.post { addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}") }
                 }
             }
+            Log.d(TAG, "SocketProxy thread finished")
         }.start()
 
         // Ruffle injection client with debug logging
