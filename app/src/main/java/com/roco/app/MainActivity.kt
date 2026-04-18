@@ -20,6 +20,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var urlText: TextView
     private lateinit var progressBar: ProgressBar
+    private var socketProxy: SocketProxyServer? = null
 
     companion object {
         private const val TAG = "RocoApp"
@@ -47,6 +48,9 @@ class MainActivity : AppCompatActivity() {
 
         // Ruffle injection client
         webView.webViewClient = RuffleWebViewClient(this)
+
+        // Start local WebSocket-to-TCP proxy for game socket connections
+        startSocketProxy()
 
         // Progress bar + Console logging
         webView.webChromeClient = object : WebChromeClient() {
@@ -124,7 +128,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        socketProxy?.shutdown()
         webView.destroy()
         super.onDestroy()
+    }
+
+    /**
+     * Start local WebSocket server that bridges Ruffle's WebSocket connections
+     * to real TCP game servers (e.g., 172.25.*:9000).
+     * This bypasses the browser sandbox limitation where WASM cannot create raw TCP sockets.
+     */
+    private fun startSocketProxy() {
+        try {
+            socketProxy = SocketProxyServer(8765)
+            socketProxy?.isReuseAddr = true
+            socketProxy?.start()
+            Log.d(TAG, "Socket proxy started on ws://127.0.0.1:8765")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start socket proxy: ${e.message}", e)
+        }
     }
 }

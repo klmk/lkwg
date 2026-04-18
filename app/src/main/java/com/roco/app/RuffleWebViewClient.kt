@@ -48,6 +48,11 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
                 "  \"urlRewriteRules\": [\n" +
                 "    [\"^//res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"],\n" +
                 "    [\"^https://res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"]\n" +
+                "  ],\n" +
+                "  \"socketProxy\": [\n" +
+                "    {\"host\": \"172.25.40.120\", \"port\": 9000, \"proxyUrl\": \"ws://127.0.0.1:8765\"},\n" +
+                "    {\"host\": \"172.25.40.120\", \"port\": 9100, \"proxyUrl\": \"ws://127.0.0.1:8765\"},\n" +
+                "    {\"host\": \"172.25.40.120\", \"port\": 9101, \"proxyUrl\": \"ws://127.0.0.1:8765\"}\n" +
                 "  ]\n" +
                 "};\n" +
                 "</script>\n"

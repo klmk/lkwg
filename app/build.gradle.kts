@@ -53,4 +53,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.webkit:webkit:1.10.0")
+    implementation("org.java-websocket:Java-WebSocket:1.5.4")
 }
