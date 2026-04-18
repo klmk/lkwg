@@ -98,7 +98,8 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             val mimeType = guessMimeType(assetPath)
             val response = WebResourceResponse(mimeType, "UTF-8", inputStream)
             val headers = mutableMapOf<String, String>()
-            headers["Access-Control-Allow-Origin"] = "*"
+            headers["Access-Control-Allow-Origin"] = "https://17roco.qq.com"
+            headers["Access-Control-Allow-Credentials"] = "true"
             response.responseHeaders = headers
             response
         } catch (e: Exception) {
@@ -258,7 +259,8 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
             val response = WebResourceResponse(mimeType, null, ByteArrayInputStream(data))
             val headers = mutableMapOf<String, String>()
-            headers["Access-Control-Allow-Origin"] = "*"
+            headers["Access-Control-Allow-Origin"] = "https://17roco.qq.com"
+            headers["Access-Control-Allow-Credentials"] = "true"
             headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             headers["Access-Control-Allow-Headers"] = "*"
             headers["Content-Length"] = data.size.toString()
