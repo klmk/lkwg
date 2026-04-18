@@ -41,12 +41,16 @@ class MainActivity : AppCompatActivity() {
         private const val TARGET_URL = "https://17roco.qq.com/default.html"
 
         // Socket proxy mappings: listenPort -> targetHost:targetPort
+        // Socket proxy routes: local port -> TGW public gateway -> game server
+        // 洛克王国使用腾讯 TGW 网关，公网玩家通过 TGW 访问内网游戏服务器
+        // 游戏连接 172.25.*:9000（内网），我们将其转发到 TGW 公网地址
+        // TGW 会自动将流量转发到正确的内网游戏服务器
         private val PROXY_ROUTES = listOf(
-            Triple(9000, "172.25.40.120", 9000),
-            Triple(9100, "172.25.40.120", 9100),
-            Triple(9101, "172.25.40.120", 9101),
-            Triple(19000, "172.25.40.121", 9000),
-            Triple(19001, "172.25.40.122", 9000),
+            Triple(9000, "140.206.161.119", 443),
+            Triple(9100, "140.206.161.119", 443),
+            Triple(9101, "140.206.161.119", 443),
+            Triple(19000, "140.206.161.253", 443),
+            Triple(19001, "140.206.161.253", 443),
         )
     }
 
