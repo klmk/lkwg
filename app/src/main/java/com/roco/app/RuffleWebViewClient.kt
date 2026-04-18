@@ -64,15 +64,21 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
         // 1. Serve Ruffle assets from local (any domain)
         if (path.contains("/__ruffle/")) {
             val rufflePath = path.substring(path.indexOf("/__ruffle/"))
-            return serveRuffleAsset(rufflePath)
+            val requestOrigin = request.requestHeaders?.get("Origin")
+                ?: request.requestHeaders?.get("origin")
+                ?: request.url.scheme + "://" + request.url.host
+            return serveRuffleAsset(rufflePath, requestOrigin)
         }
 
         // 2. Handle /__proxy/ requests (rewritten by Ruffle urlRewriteRules)
         if (path.startsWith("/__proxy/")) {
             val encodedUrl = path.substring("/__proxy/".length)
             val realUrl = java.net.URLDecoder.decode(encodedUrl, "UTF-8")
+            val requestOrigin = request.requestHeaders?.get("Origin")
+                ?: request.requestHeaders?.get("origin")
+                ?: request.url.scheme + "://" + request.url.host
             Log.d(TAG, "Proxy request: $realUrl")
-            return proxyRequest(realUrl)
+            return proxyRequest(realUrl, requestOrigin)
         }
 
         // 3. Intercept HTML pages from 17roco domains for Ruffle injection
@@ -84,21 +90,24 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
         // 4. Proxy ALL cross-origin resource requests at network level
         if (isResourceDomain(urlStr)) {
-            return proxyRequest(urlStr)
+            val reqOrigin = request.requestHeaders?.get("Origin")
+                ?: request.requestHeaders?.get("origin")
+                ?: "https://17roco.qq.com"
+            return proxyRequest(urlStr, reqOrigin)
         }
 
         return null
     }
 
     @SuppressLint("DiscouragedApi")
-    private fun serveRuffleAsset(path: String): WebResourceResponse? {
+    private fun serveRuffleAsset(path: String, origin: String): WebResourceResponse? {
         val assetPath = RUFFLE_ASSET_PATH + path.substringAfter(RUFFLE_URL_PREFIX)
         return try {
             val inputStream: InputStream = context.assets.open(assetPath)
             val mimeType = guessMimeType(assetPath)
             val response = WebResourceResponse(mimeType, "UTF-8", inputStream)
             val headers = mutableMapOf<String, String>()
-            headers["Access-Control-Allow-Origin"] = "https://17roco.qq.com"
+            headers["Access-Control-Allow-Origin"] = origin
             headers["Access-Control-Allow-Credentials"] = "true"
             response.responseHeaders = headers
             response
@@ -222,7 +231,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
      * CORS is bypassed because the request never reaches the browser's network stack.
      */
     @SuppressLint("DiscouragedApi")
-    private fun proxyRequest(urlStr: String): WebResourceResponse? {
+    private fun proxyRequest(urlStr: String, origin: String): WebResourceResponse? {
         return try {
             // Resolve protocol-relative URLs
             val resolvedUrl = if (urlStr.startsWith("//")) "https:$urlStr" else urlStr
@@ -259,7 +268,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
             val response = WebResourceResponse(mimeType, null, ByteArrayInputStream(data))
             val headers = mutableMapOf<String, String>()
-            headers["Access-Control-Allow-Origin"] = "https://17roco.qq.com"
+            headers["Access-Control-Allow-Origin"] = origin
             headers["Access-Control-Allow-Credentials"] = "true"
             headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             headers["Access-Control-Allow-Headers"] = "*"
