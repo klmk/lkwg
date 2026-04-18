@@ -43,7 +43,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "  \"publicPath\": \"/__ruffle/\",\n" +
                 "  \"polyfills\": true,\n" +
                 "  \"allowScriptAccess\": true,\n" +
-                "  \"maxExecutionDuration\": {\"secs\": 3600, \"nanos\": 0},\n" +
+                "  \"maxExecutionDuration\": 3600,\n" +
                 "  \"letterbox\": \"off\",\n" +
                 "  \"backgroundColor\": null,\n" +
                 "  \"warnOnUnsupportedContent\": false,\n" +
