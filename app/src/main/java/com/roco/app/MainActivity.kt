@@ -82,8 +82,8 @@ class MainActivity : AppCompatActivity() {
         // WebView settings
         configureWebViewSettings(webView.settings)
 
-        // Start socket proxy FIRST
-        startSocketProxy()
+        // Start socket proxy FIRST (on background thread to avoid blocking UI)
+        Thread { startSocketProxy() }.start()
 
         // Ruffle injection client with debug logging
         webView.webViewClient = RuffleWebViewClient(this, object : DebugLogger {
@@ -185,10 +185,16 @@ class MainActivity : AppCompatActivity() {
                 val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
                 proxy.isReuseAddr = true
                 proxy.start()
-                socketProxies.add(proxy)
-                addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort")
+                // Wait a bit for the server to actually bind
+                Thread.sleep(100)
+                if (proxy.isRunning) {
+                    socketProxies.add(proxy)
+                    addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort (running)")
+                } else {
+                    addDebugLine("❌ Proxy :$listenPort -> $targetHost:$targetPort (not running!)")
+                }
             } catch (e: Exception) {
-                addDebugLine("❌ Proxy :$listenPort failed: ${e.message}")
+                addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}")
             }
         }
     }

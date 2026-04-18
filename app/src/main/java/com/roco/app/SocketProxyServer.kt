@@ -24,7 +24,7 @@ class SocketProxyServer(
     private val listenPort: Int,
     private val targetHost: String,
     private val targetPort: Int
-) : WebSocketServer(InetSocketAddress(listenPort)) {
+) : WebSocketServer(InetSocketAddress("127.0.0.1", listenPort)) {
 
     companion object {
         private const val TAG = "SocketProxy"
