@@ -83,6 +83,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Write proxy status to webconsole.log so we can read it via ADB
+        val proxyStatus = if (socketProxy != null) "SocketProxy OK: ws://127.0.0.1:8765" else "SocketProxy FAILED"
+        try {
+            val logFile = File(filesDir, "webconsole.log")
+            FileWriter(logFile, true).use { writer ->
+                writer.write("[MainActivity] $proxyStatus\n")
+            }
+        } catch (_: Exception) {}
+
         webView.loadUrl(TARGET_URL)
     }
 
@@ -143,9 +152,22 @@ class MainActivity : AppCompatActivity() {
             socketProxy = SocketProxyServer(8765)
             socketProxy?.isReuseAddr = true
             socketProxy?.start()
-            Log.d(TAG, "Socket proxy started on ws://127.0.0.1:8765")
+            val msg = "Socket proxy started on ws://127.0.0.1:8765"
+            Log.d(TAG, msg)
+            writeDebugLog(msg)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start socket proxy: ${e.message}", e)
+            val msg = "Failed to start socket proxy: ${e.message}"
+            Log.e(TAG, msg, e)
+            writeDebugLog(msg)
         }
+    }
+
+    private fun writeDebugLog(msg: String) {
+        try {
+            val logFile = File(filesDir, "debug.log")
+            FileWriter(logFile, true).use { writer ->
+                writer.write("${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())} $msg\n")
+            }
+        } catch (_: Exception) {}
     }
 }
