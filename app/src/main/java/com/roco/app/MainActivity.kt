@@ -83,7 +83,19 @@ class MainActivity : AppCompatActivity() {
         configureWebViewSettings(webView.settings)
 
         // Start socket proxy FIRST (on background thread to avoid blocking UI)
-        Thread { startSocketProxy() }.start()
+        Thread {
+            for ((listenPort, targetHost, targetPort) in PROXY_ROUTES) {
+                try {
+                    val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
+                    proxy.isReuseAddr = true
+                    proxy.start()
+                    socketProxies.add(proxy)
+                    handler.post { addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort started") }
+                } catch (e: Exception) {
+                    handler.post { addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}") }
+                }
+            }
+        }.start()
 
         // Ruffle injection client with debug logging
         webView.webViewClient = RuffleWebViewClient(this, object : DebugLogger {
@@ -173,24 +185,6 @@ class MainActivity : AppCompatActivity() {
         socketProxies.forEach { it.shutdown() }
         webView.destroy()
         super.onDestroy()
-    }
-
-    /**
-     * Start local WebSocket server that bridges Ruffle's WebSocket connections
-     * to real TCP game servers (e.g., 172.25.*:9000).
-     */
-    private fun startSocketProxy() {
-        for ((listenPort, targetHost, targetPort) in PROXY_ROUTES) {
-            try {
-                val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
-                proxy.isReuseAddr = true
-                proxy.start()
-                socketProxies.add(proxy)
-                addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort started")
-            } catch (e: Exception) {
-                addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}")
-            }
-        }
     }
 
     // === Debug panel ===
