@@ -47,7 +47,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "  \"backgroundColor\": null,\n" +
                 "  \"warnOnUnsupportedContent\": false,\n" +
                 "  \"upgradeToHttps\": true,\n" +
-                "  \"logLevel\": \"Debug\",\n" +
+                "  \"logLevel\": \"Error\",\n" +
                 "  \"credentialAllowList\": [\"https://res.17roco.qq.com\", \"https://web2.17roco.qq.com\", \"https://17roco.qq.com\"],\n" +
                 "  \"urlRewriteRules\": [\n" +
                 "    [\"^//res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"],\n" +
