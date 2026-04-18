@@ -185,14 +185,8 @@ class MainActivity : AppCompatActivity() {
                 val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
                 proxy.isReuseAddr = true
                 proxy.start()
-                // Wait a bit for the server to actually bind
-                Thread.sleep(100)
-                if (proxy.isRunning) {
-                    socketProxies.add(proxy)
-                    addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort (running)")
-                } else {
-                    addDebugLine("❌ Proxy :$listenPort -> $targetHost:$targetPort (not running!)")
-                }
+                socketProxies.add(proxy)
+                addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort started")
             } catch (e: Exception) {
                 addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}")
             }
