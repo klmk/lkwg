@@ -62,6 +62,33 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "  ]\n" +
                 "};\n" +
                 "console.log('[ROCO-CONFIG] maxExecutionDuration=' + window.RufflePlayer.config.maxExecutionDuration);\n" +
+                // Hook WebAssembly.Memory to remove/increase maximum memory limit
+                // This prevents OOM crashes in large Flash games like 洛克王国
+                "(function() {\n" +
+                "  var OrigMemory = WebAssembly.Memory;\n" +
+                "  WebAssembly.Memory = function(descriptor) {\n" +
+                "    if (descriptor && descriptor.maximum) {\n" +
+                "      console.log('[WASM-MEMORY] Original max: ' + descriptor.maximum + ' pages (' + (descriptor.maximum * 64) + ' KB)');\n" +
+                "      // Increase max to 4GB (65536 pages) - the WASM32 theoretical max\n" +
+                "      descriptor.maximum = 65536;\n" +
+                "      console.log('[WASM-MEMORY] Increased max to: ' + descriptor.maximum + ' pages (4 GB)');\n" +
+                "    }\n" +
+                "    return new OrigMemory(descriptor);\n" +
+                "  };\n" +
+                "  WebAssembly.Memory.prototype = OrigMemory.prototype;\n" +
+                "  console.log('[WASM-MEMORY] Hook installed successfully');\n" +
+                "})();\n" +
+                // Capture detailed error info including WASM stack traces
+                "window.addEventListener('error', function(e) {\n" +
+                "  if (e.message && e.message.includes('unreachable')) {\n" +
+                "    console.log('[CRASH-DETAIL] msg=' + e.message + ' file=' + e.filename + ' line=' + e.lineno + ' col=' + e.colno);\n" +
+                "    if (e.error && e.error.stack) console.log('[CRASH-STACK] ' + e.error.stack);\n" +
+                "  }\n" +
+                "});\n" +
+                "window.addEventListener('unhandledrejection', function(e) {\n" +
+                "  console.log('[REJECTION] ' + (e.reason ? e.reason.message || e.reason : 'unknown'));\n" +
+                "  if (e.reason && e.reason.stack) console.log('[REJECTION-STACK] ' + e.reason.stack);\n" +
+                "});\n" +
                 "</script>\n" +
                 "<script src=\"/__ruffle/ruffle.js\"></script>\n"
         }

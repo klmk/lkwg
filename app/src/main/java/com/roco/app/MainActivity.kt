@@ -61,6 +61,13 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.hide()
         setContentView(R.layout.activity_main)
 
+        // Enable experimental WebView features for better WASM support
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WebView.setWebContentsDebuggingEnabled(true)
+            }
+        } catch (_: Exception) {}
+
         urlText = findViewById(R.id.url_text)
         progressBar = findViewById(R.id.progress_bar)
         webView = findViewById(R.id.webview)
