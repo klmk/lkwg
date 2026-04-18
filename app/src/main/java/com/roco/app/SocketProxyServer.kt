@@ -36,12 +36,12 @@ class SocketProxyServer(private val port: Int) : WebSocketServer(InetSocketAddre
         Log.d(TAG, "WebSocket connected from ${conn?.remoteSocketAddress}")
 
         // Parse target from query string: ws://127.0.0.1:8765/?host=172.25.40.120&port=9000
-        val uri = conn?.uri ?: return
-        val query = uri.substringAfter("?", "")
-        val params = query.split("&").associate {
+        val resourceDescriptor = conn?.resourceDescriptor ?: return
+        val query = resourceDescriptor.substringAfter("?", "")
+        val params = query.split("&").mapNotNull {
             val parts = it.split("=", limit = 2)
-            if (parts.size == 2) parts[0] to parts[1] else parts[0] to ""
-        }
+            if (parts.size == 2) parts[0] to parts[1] else null
+        }.toMap()
 
         val targetHost = params["host"] ?: "172.25.40.120"
         val targetPort = (params["port"] ?: "9000").toInt()
