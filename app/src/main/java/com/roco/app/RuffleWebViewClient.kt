@@ -36,8 +36,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
     // so shouldInterceptRequest can proxy them (bypasses CORS + keeps original URL for SWF)
     private val ruffleInjection: String
         get() {
-            return "<script src=\"/__ruffle/ruffle.js\"></script>\n" +
-                "<script>\n" +
+            return "<script>\n" +
                 "window.RufflePlayer = window.RufflePlayer || {};\n" +
                 "window.RufflePlayer.config = {\n" +
                 "  \"publicPath\": \"/__ruffle/\",\n" +
@@ -63,7 +62,8 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "  ]\n" +
                 "};\n" +
                 "console.log('[ROCO-CONFIG] maxExecutionDuration=' + window.RufflePlayer.config.maxExecutionDuration);\n" +
-                "</script>\n"
+                "</script>\n" +
+                "<script src=\"/__ruffle/ruffle.js\"></script>\n"
         }
 
     @SuppressLint("DiscouragedApi")
