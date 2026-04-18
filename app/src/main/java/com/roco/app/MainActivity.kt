@@ -2,25 +2,39 @@ package com.roco.app
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.Button
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 import java.io.FileWriter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var urlText: TextView
     private lateinit var progressBar: ProgressBar
+    private lateinit var debugPanel: ScrollView
+    private lateinit var debugText: TextView
+    private lateinit var debugToggle: Button
     private var socketProxy: SocketProxyServer? = null
+    private val debugLines = mutableListOf<String>()
+    private val handler = Handler(Looper.getMainLooper())
 
     companion object {
         private const val TAG = "RocoApp"
@@ -37,6 +51,19 @@ class MainActivity : AppCompatActivity() {
         urlText = findViewById(R.id.url_text)
         progressBar = findViewById(R.id.progress_bar)
         webView = findViewById(R.id.webview)
+        debugPanel = findViewById(R.id.debug_panel)
+        debugText = findViewById(R.id.debug_text)
+        debugToggle = findViewById(R.id.debug_toggle)
+
+        // Debug toggle
+        debugToggle.setOnClickListener {
+            if (debugPanel.visibility == View.VISIBLE) {
+                debugPanel.visibility = View.GONE
+            } else {
+                debugPanel.visibility = View.VISIBLE
+                updateDebugText()
+            }
+        }
 
         // Cookie
         val cookieManager = CookieManager.getInstance()
@@ -46,11 +73,15 @@ class MainActivity : AppCompatActivity() {
         // WebView settings
         configureWebViewSettings(webView.settings)
 
-        // Ruffle injection client
-        webView.webViewClient = RuffleWebViewClient(this)
-
-        // Start local WebSocket-to-TCP proxy for game socket connections
+        // Start socket proxy FIRST
         startSocketProxy()
+
+        // Ruffle injection client with debug logging
+        webView.webViewClient = RuffleWebViewClient(this, object : DebugLogger {
+            override fun log(msg: String) {
+                addDebugLine(msg)
+            }
+        })
 
         // Progress bar + Console logging
         webView.webChromeClient = object : WebChromeClient() {
@@ -70,27 +101,20 @@ class MainActivity : AppCompatActivity() {
                     val level = message.message()
                     val source = message.sourceId()
                     val lineNum = message.lineNumber()
-                    val logLine = "[$source:$lineNum] $level"
+                    val logLine = "[${message.messageLevel()}] $level"
                     Log.d(TAG, "CONSOLE: $logLine")
+                    addDebugLine(logLine)
+                    // Also write to file as backup
                     try {
                         val logFile = File(filesDir, "webconsole.log")
                         FileWriter(logFile, true).use { writer ->
-                            writer.write(logLine + "\n")
+                            writer.write("[${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())}] $logLine\n")
                         }
                     } catch (_: Exception) {}
                 }
                 return true
             }
         }
-
-        // Write proxy status to webconsole.log so we can read it via ADB
-        val proxyStatus = if (socketProxy != null) "SocketProxy OK: ws://127.0.0.1:8765" else "SocketProxy FAILED"
-        try {
-            val logFile = File(filesDir, "webconsole.log")
-            FileWriter(logFile, true).use { writer ->
-                writer.write("[MainActivity] $proxyStatus\n")
-            }
-        } catch (_: Exception) {}
 
         webView.loadUrl(TARGET_URL)
     }
@@ -145,29 +169,50 @@ class MainActivity : AppCompatActivity() {
     /**
      * Start local WebSocket server that bridges Ruffle's WebSocket connections
      * to real TCP game servers (e.g., 172.25.*:9000).
-     * This bypasses the browser sandbox limitation where WASM cannot create raw TCP sockets.
      */
     private fun startSocketProxy() {
         try {
             socketProxy = SocketProxyServer(8765)
             socketProxy?.isReuseAddr = true
             socketProxy?.start()
-            val msg = "Socket proxy started on ws://127.0.0.1:8765"
-            Log.d(TAG, msg)
-            writeDebugLog(msg)
+            addDebugLine("✅ SocketProxy started: ws://127.0.0.1:8765")
         } catch (e: Exception) {
-            val msg = "Failed to start socket proxy: ${e.message}"
-            Log.e(TAG, msg, e)
-            writeDebugLog(msg)
+            addDebugLine("❌ SocketProxy FAILED: ${e.message}")
         }
     }
 
-    private fun writeDebugLog(msg: String) {
-        try {
-            val logFile = File(filesDir, "debug.log")
-            FileWriter(logFile, true).use { writer ->
-                writer.write("${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())} $msg\n")
-            }
-        } catch (_: Exception) {}
+    // === Debug panel ===
+
+    @Synchronized
+    private fun addDebugLine(line: String) {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        debugLines.add("[$time] $line")
+        // Keep last 200 lines
+        if (debugLines.size > 200) {
+            debugLines.removeAt(0)
+        }
+        // Update UI if panel is visible
+        if (debugPanel.visibility == View.VISIBLE) {
+            handler.post { updateDebugText() }
+        }
     }
+
+    private fun updateDebugText() {
+        val sb = StringBuilder()
+        // Show last 50 lines
+        val start = maxOf(0, debugLines.size - 50)
+        for (i in start until debugLines.size) {
+            sb.append(debugLines[i]).append("\n")
+        }
+        debugText.text = sb.toString()
+        // Auto-scroll to bottom
+        debugPanel.post { debugPanel.fullScroll(ScrollView.FOCUS_DOWN) }
+    }
+}
+
+/**
+ * Interface for RuffleWebViewClient to send debug logs to MainActivity
+ */
+interface DebugLogger {
+    fun log(msg: String)
 }

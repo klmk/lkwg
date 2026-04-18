@@ -15,7 +15,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
 
-class RuffleWebViewClient(private val context: Context) : WebViewClient() {
+class RuffleWebViewClient(private val context: Context, private val debugLogger: DebugLogger? = null) : WebViewClient() {
 
     companion object {
         private const val TAG = "RuffleWebViewClient"
@@ -25,6 +25,11 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
     }
 
     private val injectedUrls = mutableSetOf<String>()
+
+    private fun debug(msg: String) {
+        Log.d(TAG, msg)
+        debugLogger?.log(msg)
+    }
 
     // Ruffle injection script
     // Uses urlRewriteRules to redirect SWF internal requests through /__proxy/
@@ -82,7 +87,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             val requestOrigin = request.requestHeaders?.get("Origin")
                 ?: request.requestHeaders?.get("origin")
                 ?: request.url.scheme + "://" + request.url.host
-            Log.d(TAG, "Proxy request: $realUrl")
+            debug("Proxy request: $realUrl")
             return proxyRequest(realUrl, requestOrigin)
         }
 
@@ -117,7 +122,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             response.responseHeaders = headers
             response
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load Ruffle asset: $assetPath", e)
+            debug("❌ Failed to load Ruffle asset: $assetPath: ${e.message}")
             WebResourceResponse(
                 "text/plain", "UTF-8",
                 ByteArrayInputStream("Not found: $assetPath".toByteArray())
@@ -171,12 +176,12 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
 
             val modifiedHtml = injectRuffleScripts(finalHtml)
             injectedUrls.add(urlStr)
-            Log.d(TAG, "Injected Ruffle into $urlStr (${htmlBytes.size} bytes)")
+            debug("Injected Ruffle into $urlStr (${htmlBytes.size} bytes)")
 
             WebResourceResponse("text/html", "UTF-8",
                 ByteArrayInputStream(modifiedHtml.toByteArray(Charsets.UTF_8)))
         } catch (e: Exception) {
-            Log.e(TAG, "Error injecting HTML for $urlStr", e)
+            debug("❌ Error injecting HTML for $urlStr: ${e.message}")
             null
         }
     }
@@ -269,7 +274,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             val contentType = conn.contentType ?: "application/octet-stream"
             val mimeType = contentType.split(";")[0].trim()
 
-            Log.d(TAG, "Proxied $resolvedUrl: ${data.size} bytes, type=$mimeType")
+            debug("Proxied $resolvedUrl: ${data.size} bytes, type=$mimeType")
 
             val response = WebResourceResponse(mimeType, null, ByteArrayInputStream(data))
             val headers = mutableMapOf<String, String>()
@@ -281,7 +286,7 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             response.responseHeaders = headers
             response
         } catch (e: Exception) {
-            Log.e(TAG, "Proxy error for $urlStr", e)
+            debug("❌ Proxy error for $urlStr: ${e.message}")
             null
         }
     }
@@ -328,11 +333,11 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
     }
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-        Log.d(TAG, "Page started: $url")
+        debug("Page started: $url")
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
-        Log.d(TAG, "Page finished: $url")
+        debug("Page finished: $url")
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
