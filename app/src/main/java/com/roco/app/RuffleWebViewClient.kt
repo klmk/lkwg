@@ -75,8 +75,9 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
             return proxyRequest(realUrl)
         }
 
-        // 3. Intercept ALL HTML from 17roco domains for Ruffle injection
-        if (isRocoDomain(urlStr) && !injectedUrls.contains(urlStr)) {
+        // 3. Intercept HTML pages from 17roco domains for Ruffle injection
+        //    Skip CGI/API requests (they return non-HTML content)
+        if (isRocoDomain(urlStr) && !injectedUrls.contains(urlStr) && isHtmlPage(urlStr)) {
             val response = downloadAndInjectHtml(urlStr)
             if (response != null) return response
         }
@@ -200,6 +201,18 @@ class RuffleWebViewClient(private val context: Context) : WebViewClient() {
         } catch (e: Exception) {
             return false
         }
+    }
+
+    // Only inject Ruffle into actual HTML pages, skip CGI/API/image/script requests
+    private fun isHtmlPage(url: String): Boolean {
+        val path = try { Uri.parse(url).path ?: "" } catch (e: Exception) { return false }
+        if (path.contains("/cgi-bin/") || path.contains("/fcgi-bin/")) return false
+        val nonHtml = listOf(".js", ".css", ".json", ".xml", ".png", ".jpg", ".jpeg", ".gif",
+                             ".swf", ".ico", ".woff", ".woff2", ".ttf", ".svg", ".mp3", ".mp4")
+        val lower = path.lowercase()
+        if (nonHtml.any { lower.endsWith(it) }) return false
+        return lower.endsWith(".html") || lower.endsWith(".htm") ||
+               !path.contains(".") || path.endsWith("/")
     }
 
     /**
