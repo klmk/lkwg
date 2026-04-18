@@ -43,7 +43,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "  \"publicPath\": \"/__ruffle/\",\n" +
                 "  \"polyfills\": true,\n" +
                 "  \"allowScriptAccess\": true,\n" +
-                "  \"maxExecutionDuration\": 0,\n" +
+                "  \"maxExecutionDuration\": {\"secs\": 3600, \"nanos\": 0},\n" +
                 "  \"letterbox\": \"off\",\n" +
                 "  \"backgroundColor\": null,\n" +
                 "  \"warnOnUnsupportedContent\": false,\n" +
@@ -55,9 +55,11 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "    [\"^https://res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"]\n" +
                 "  ],\n" +
                 "  \"socketProxy\": [\n" +
-                "    {\"host\": \"172.25.40.120\", \"port\": 9000, \"proxyUrl\": \"ws://127.0.0.1:8765\"},\n" +
-                "    {\"host\": \"172.25.40.120\", \"port\": 9100, \"proxyUrl\": \"ws://127.0.0.1:8765\"},\n" +
-                "    {\"host\": \"172.25.40.120\", \"port\": 9101, \"proxyUrl\": \"ws://127.0.0.1:8765\"}\n" +
+                "    {\"host\": \"172.25.40.120\", \"port\": 9000, \"proxyUrl\": \"ws://127.0.0.1:9000\"},\n" +
+                "    {\"host\": \"172.25.40.120\", \"port\": 9100, \"proxyUrl\": \"ws://127.0.0.1:9100\"},\n" +
+                "    {\"host\": \"172.25.40.120\", \"port\": 9101, \"proxyUrl\": \"ws://127.0.0.1:9101\"},\n" +
+                "    {\"host\": \"172.25.40.121\", \"port\": 9000, \"proxyUrl\": \"ws://127.0.0.1:19000\"},\n" +
+                "    {\"host\": \"172.25.40.122\", \"port\": 9000, \"proxyUrl\": \"ws://127.0.0.1:19001\"}\n" +
                 "  ]\n" +
                 "};\n" +
                 "</script>\n"

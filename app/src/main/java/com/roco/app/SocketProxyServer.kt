@@ -1,6 +1,7 @@
 package com.roco.app
 
 import android.util.Log
+import android.widget.Toast
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
@@ -12,68 +13,68 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 /**
  * Local WebSocket-to-TCP proxy server.
- * Runs on the Android device, bridges Ruffle's WebSocket connections to real TCP game servers.
+ * Each instance bridges one specific host:port pair.
  *
- * Flow: Ruffle (WASM) --[WebSocket]--> this proxy --[TCP Socket]--> game server (172.25.*:9000)
+ * Flow: Ruffle (WASM) --[WebSocket]--> this proxy --[TCP Socket]--> game server
  */
-class SocketProxyServer(private val port: Int) : WebSocketServer(InetSocketAddress(port)) {
+class SocketProxyServer(
+    private val listenPort: Int,
+    private val targetHost: String,
+    private val targetPort: Int
+) : WebSocketServer(InetSocketAddress(listenPort)) {
 
     companion object {
-        private const val TAG = "SocketProxyServer"
+        private const val TAG = "SocketProxy"
     }
 
     private val connections = CopyOnWriteArrayList<TcpBridge>()
     private val executor = Executors.newCachedThreadPool()
+    private var toastMessage: String? = null
+
+    fun setToastMessage(msg: String) {
+        toastMessage = msg
+    }
+
+    fun getToastMessage(): String? = toastMessage
 
     override fun onStart() {
-        Log.d(TAG, "WebSocket proxy server started on port $port")
+        Log.d(TAG, "Proxy listening on ws://127.0.0.1:$listenPort -> $targetHost:$targetPort")
+        toastMessage = "Proxy $listenPort -> $targetHost:$targetPort ready"
     }
 
     override fun onOpen(conn: WebSocket?, handshake: ClientHandshake?) {
-        Log.d(TAG, "WebSocket connected from ${conn?.remoteSocketAddress}")
-
-        // Parse target from query string: ws://127.0.0.1:8765/?host=172.25.40.120&port=9000
-        val resourceDescriptor = conn?.resourceDescriptor ?: return
-        val query = resourceDescriptor.substringAfter("?", "")
-        val params = query.split("&").mapNotNull {
-            val parts = it.split("=", limit = 2)
-            if (parts.size == 2) parts[0] to parts[1] else null
-        }.toMap()
-
-        val targetHost = params["host"] ?: "172.25.40.120"
-        val targetPort = (params["port"] ?: "9000").toInt()
-
-        Log.d(TAG, "Bridging to TCP $targetHost:$targetPort")
+        Log.d(TAG, "WebSocket connected on port $listenPort, bridging to $targetHost:$targetPort")
+        toastMessage = "🔌 Connecting $targetHost:$targetPort..."
 
         try {
             val tcpSocket = Socket()
-            tcpSocket.soTimeout = 35000 // 35 second timeout (matches game protocol)
-            tcpSocket.connect(InetSocketAddress(targetHost, targetPort), 10000)
+            tcpSocket.soTimeout = 60000 // 60 second timeout
+            tcpSocket.connect(InetSocketAddress(targetHost, targetPort), 15000)
             Log.d(TAG, "TCP connected to $targetHost:$targetPort")
+            toastMessage = "✅ TCP connected to $targetHost:$targetPort"
 
             val bridge = TcpBridge(conn!!, tcpSocket)
             connections.add(bridge)
 
             executor.submit { bridge.readTcpToWs() }
-            executor.submit { bridge.readWsToTcp() }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to connect TCP $targetHost:$targetPort: ${e.message}")
-            conn.close(1014, "TCP connection failed: ${e.message}")
+            val errMsg = "❌ TCP failed $targetHost:$targetPort: ${e.message}"
+            Log.e(TAG, errMsg)
+            toastMessage = errMsg
+            conn?.close(1014, errMsg)
         }
     }
 
     override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
-        Log.d(TAG, "WebSocket closed: code=$code reason=$reason remote=$remote")
+        Log.d(TAG, "WebSocket closed on port $listenPort: code=$code reason=$reason")
         connections.removeAll { it.ws == conn }
     }
 
     override fun onMessage(conn: WebSocket?, message: String?) {
-        // Text messages not expected, but log them
-        Log.d(TAG, "WebSocket text message (ignored): ${message?.take(100)}")
+        Log.d(TAG, "WS text on port $listenPort (ignored): ${message?.take(50)}")
     }
 
     override fun onMessage(conn: WebSocket?, message: ByteBuffer?) {
@@ -86,14 +87,15 @@ class SocketProxyServer(private val port: Int) : WebSocketServer(InetSocketAddre
                 bridge.tcpOutputStream.write(bytes)
                 bridge.tcpOutputStream.flush()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to write to TCP: ${e.message}")
+                Log.e(TAG, "TCP write error on port $listenPort: ${e.message}")
                 conn.close(1011, "TCP write error")
             }
         }
     }
 
     override fun onError(conn: WebSocket?, ex: Exception?) {
-        Log.e(TAG, "WebSocket error: ${ex?.message}", ex)
+        Log.e(TAG, "WS error on port $listenPort: ${ex?.message}", ex)
+        toastMessage = "❌ WS error: ${ex?.message}"
     }
 
     fun shutdown() {
@@ -101,12 +103,9 @@ class SocketProxyServer(private val port: Int) : WebSocketServer(InetSocketAddre
         connections.clear()
         stop()
         executor.shutdown()
-        Log.d(TAG, "Proxy server shut down")
+        Log.d(TAG, "Proxy on port $listenPort shut down")
     }
 
-    /**
-     * Bridges a single WebSocket connection to a single TCP socket.
-     */
     inner class TcpBridge(
         val ws: WebSocket,
         val tcpSocket: Socket
@@ -124,17 +123,13 @@ class SocketProxyServer(private val port: Int) : WebSocketServer(InetSocketAddre
                     ws.send(data)
                 }
             } catch (e: SocketTimeoutException) {
-                Log.w(TAG, "TCP read timeout (normal for idle connection)")
+                Log.w(TAG, "TCP read timeout on port $listenPort (idle)")
             } catch (e: Exception) {
-                Log.e(TAG, "TCP read error: ${e.message}")
+                Log.e(TAG, "TCP read error on port $listenPort: ${e.message}")
             } finally {
-                Log.d(TAG, "TCP read stream ended, closing bridge")
+                Log.d(TAG, "TCP stream ended on port $listenPort")
                 close()
             }
-        }
-
-        fun readWsToTcp() {
-            // Handled by onMessage callback above
         }
 
         fun close() {

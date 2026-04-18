@@ -32,13 +32,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var debugPanel: ScrollView
     private lateinit var debugText: TextView
     private lateinit var debugToggle: Button
-    private var socketProxy: SocketProxyServer? = null
+    private var socketProxies = mutableListOf<SocketProxyServer>()
     private val debugLines = mutableListOf<String>()
     private val handler = Handler(Looper.getMainLooper())
 
     companion object {
         private const val TAG = "RocoApp"
         private const val TARGET_URL = "https://17roco.qq.com/default.html"
+
+        // Socket proxy mappings: listenPort -> targetHost:targetPort
+        private val PROXY_ROUTES = listOf(
+            Triple(9000, "172.25.40.120", 9000),
+            Triple(9100, "172.25.40.120", 9100),
+            Triple(9101, "172.25.40.120", 9101),
+            Triple(19000, "172.25.40.121", 9000),
+            Triple(19001, "172.25.40.122", 9000),
+        )
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -161,7 +170,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        socketProxy?.shutdown()
+        socketProxies.forEach { it.shutdown() }
         webView.destroy()
         super.onDestroy()
     }
@@ -171,13 +180,16 @@ class MainActivity : AppCompatActivity() {
      * to real TCP game servers (e.g., 172.25.*:9000).
      */
     private fun startSocketProxy() {
-        try {
-            socketProxy = SocketProxyServer(8765)
-            socketProxy?.isReuseAddr = true
-            socketProxy?.start()
-            addDebugLine("✅ SocketProxy started: ws://127.0.0.1:8765")
-        } catch (e: Exception) {
-            addDebugLine("❌ SocketProxy FAILED: ${e.message}")
+        for ((listenPort, targetHost, targetPort) in PROXY_ROUTES) {
+            try {
+                val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
+                proxy.isReuseAddr = true
+                proxy.start()
+                socketProxies.add(proxy)
+                addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort")
+            } catch (e: Exception) {
+                addDebugLine("❌ Proxy :$listenPort failed: ${e.message}")
+            }
         }
     }
 
