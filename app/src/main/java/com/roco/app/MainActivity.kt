@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d(TAG, "=== onCreate started ===")
 
         supportActionBar?.hide()
         setContentView(R.layout.activity_main)
@@ -82,25 +83,23 @@ class MainActivity : AppCompatActivity() {
         // WebView settings
         configureWebViewSettings(webView.settings)
 
-        // Start socket proxy FIRST (on background thread to avoid blocking UI)
-        Thread {
-            Log.d(TAG, "SocketProxy thread started")
-            for ((listenPort, targetHost, targetPort) in PROXY_ROUTES) {
-                try {
-                    Log.d(TAG, "Starting proxy :$listenPort -> $targetHost:$targetPort")
-                    val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
-                    proxy.isReuseAddr = true
-                    proxy.start()
-                    socketProxies.add(proxy)
-                    Log.d(TAG, "Proxy :$listenPort started successfully")
-                    handler.post { addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort started") }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Proxy :$listenPort FAILED", e)
-                    handler.post { addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}") }
-                }
+        // Start socket proxy FIRST
+        Log.d(TAG, "=== Starting SocketProxy servers ===")
+        for ((listenPort, targetHost, targetPort) in PROXY_ROUTES) {
+            try {
+                Log.d(TAG, "Starting proxy :$listenPort -> $targetHost:$targetPort")
+                val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
+                proxy.isReuseAddr = true
+                proxy.start()
+                socketProxies.add(proxy)
+                addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort started")
+                Log.d(TAG, "Proxy :$listenPort started OK")
+            } catch (e: Exception) {
+                addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}")
+                Log.e(TAG, "Proxy :$listenPort FAILED", e)
             }
-            Log.d(TAG, "SocketProxy thread finished")
-        }.start()
+        }
+        Log.d(TAG, "=== SocketProxy servers done ===")
 
         // Ruffle injection client with debug logging
         webView.webViewClient = RuffleWebViewClient(this, object : DebugLogger {
