@@ -143,7 +143,7 @@ class MainActivity : AppCompatActivity() {
                     } catch (_: Exception) {}
 
                     // Detect Ruffle crash and auto-reload
-                    if (level.contains("unreachable") && message.messageLevel() == ConsoleMessage.Level.ERROR) {
+                    if (level.contains("unreachable") && message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
                         if (reloadCount < MAX_RELOADS) {
                             reloadCount++
                             Log.w(TAG, "Ruffle unreachable error detected, reload #$reloadCount in 2s...")
