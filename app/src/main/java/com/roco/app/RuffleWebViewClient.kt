@@ -350,7 +350,6 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
 
             // Collect Set-Cookie headers and set them via CookieManager
             val setCookies = conn.headerFields?.get("Set-Cookie") ?: emptyList()
-            val cookieManager = android.webkit.CookieManager.getInstance()
             for (cookie in setCookies) {
                 // Set-Cookie format: "name=value; PATH=/; DOMAIN=..."
                 val cookieValue = cookie.substringBefore(";")
