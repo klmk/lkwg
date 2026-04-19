@@ -468,6 +468,23 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
 
     override fun onPageFinished(view: WebView?, url: String?) {
         debug("Page finished: $url")
+        // For login/logintarget pages: inject rUri interceptor via evaluateJavascript
+        // (shouldInterceptRequest doesn't intercept main frame navigation)
+        if (url != null && (url.contains("login.html") || url.contains("logintarget.html"))) {
+            view?.evaluateJavascript("""
+                (function(){
+                  function fixUri(u){return typeof u==='string'&&u.indexOf('rUri://')===0?u.replace('rUri://','https://'):u;}
+                  try{
+                    var d=Object.getOwnPropertyDescriptor(window.location,'href');
+                    if(d&&d.set)Object.defineProperty(window.location,'href',{set:function(v){d.set.call(this,fixUri(v));},get:d.get,configurable:true});
+                  }catch(e){}
+                  var oa=window.location.assign;window.location.assign=function(u){oa.call(this,fixUri(u));};
+                  var or=window.location.replace;window.location.replace=function(u){or.call(this,fixUri(u));};
+                  console.log('[RUFFLE] rUri interceptor ready (via evaluateJavascript)');
+                })();
+            """.trimIndent(), null)
+            debug("Injected rUri interceptor via evaluateJavascript for $url")
+        }
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
