@@ -96,24 +96,17 @@ class SocketProxyServer(
                 // Intercept TGW handshake and rewrite Host header
                 if (tgwZone != null && bytes.size >= 4 && bytes[0] == 't'.code.toByte() && bytes[1] == 'g'.code.toByte() && bytes[2] == 'w'.code.toByte()) {
                     val original = String(bytes, Charsets.UTF_8)
-                    Log.d(TAG, "Intercepted TGW command, Host line: ${original.lines().find { it.startsWith("Host:") }}")
+                    Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
 
                     // Check if this is a stats connection (not game server)
-                    val hostMatch = Regex("Host: ([^\r\n]+)").find(original)
-                    val hostValue = hostMatch?.groupValues?.get(1) ?: ""
-
-                    if (hostValue.contains("stat.")) {
-                        // This is a stats/monitoring connection, not a game server
-                        // Close it immediately so the game moves on
-                        Log.d(TAG, "Stats connection detected ($hostValue), closing to let game continue")
+                    if (original.contains("stat.")) {
+                        Log.d(TAG, "Stats connection detected, closing to let game continue")
                         bridge.close()
                         return
                     }
 
                     // Rewrite Host header for game server connections
-                    // Game sends: "tgw_l7_forward\r\nHost: 172.25.40.120:9000\r\n\r\n"
-                    // TGW expects: "tgw_l7_forward\r\nHost: zone5.17roco.qq.com:443\r\n\r\n"
-                    val rewritten = original.replaceFirst(Regex("Host: [^\r\n]+"), "Host: $tgwZone.17roco.qq.com:$targetPort")
+                    val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
                     bytes = rewritten.toByteArray(Charsets.UTF_8)
                     Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
                 }
