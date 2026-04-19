@@ -49,30 +49,8 @@ class SocketProxyServer(
     }
 
     override fun onOpen(conn: WebSocket?, handshake: ClientHandshake?) {
-        Log.d(TAG, "WebSocket connected on port $listenPort, bridging to $targetHost:$targetPort")
-        toastMessage = "Connecting $targetHost:$targetPort..."
-
-        try {
-            val tcpSocket = Socket()
-            tcpSocket.soTimeout = 60000 // 60 second timeout
-            tcpSocket.connect(InetSocketAddress(targetHost, targetPort), 15000)
-            Log.d(TAG, "TCP connected to $targetHost:$targetPort")
-            toastMessage = "TCP connected to $targetHost:$targetPort"
-
-            // NOTE: Do NOT inject TGW handshake here!
-            // The game SWF already sends TGW L7 forward command itself.
-            // We just need to connect to the TGW public IP and let the game handle the handshake.
-
-            val bridge = TcpBridge(conn!!, tcpSocket)
-            connections.add(bridge)
-
-            executor.submit { bridge.readTcpToWs() }
-        } catch (e: Exception) {
-            val errMsg = "TCP failed $targetHost:$targetPort: ${e.message}"
-            Log.e(TAG, errMsg)
-            toastMessage = errMsg
-            conn?.close(1014, errMsg)
-        }
+        Log.d(TAG, "WebSocket connected on port $listenPort")
+        // Don't connect TCP yet - wait for first message to determine if stats or game
     }
 
     override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
@@ -86,50 +64,74 @@ class SocketProxyServer(
 
     override fun onMessage(conn: WebSocket?, message: ByteBuffer?) {
         if (message == null || conn == null) return
+
+        var bytes = ByteArray(message.remaining())
+        message.get(bytes)
+        Log.d(TAG, "WS->TCP on port $listenPort: ${bytes.size} bytes, first 20: ${bytes.take(20).map { String.format("%02x", it) }.joinToString(" ")}")
+
+        // Check if this is a TGW handshake (first message)
+        if (bytes.size >= 4 && bytes[0] == 't'.code.toByte() && bytes[1] == 'g'.code.toByte() && bytes[2] == 'w'.code.toByte()) {
+            val original = String(bytes, Charsets.UTF_8)
+            Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
+
+            if (original.contains("stat.")) {
+                // Stats connection: send fake TGW ok response, NO TCP connection needed
+                Log.d(TAG, "Stats connection - sending fake TGW ok response (no TCP)")
+                val fakeTgwResponse = byteArrayOf(
+                    0x95.toByte(), 0x27.toByte(), 0x00.toByte(), 0x00.toByte(),
+                    0x00.toByte(), 0x01.toByte(), 0x00.toByte(), 0x02.toByte(),
+                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
+                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
+                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x08.toByte(),
+                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
+                    0x02.toByte(), 0x6f.toByte(), 0x6b.toByte() // "ok"
+                )
+                conn.send(fakeTgwResponse)
+                Log.d(TAG, "Fake TGW ok sent (${fakeTgwResponse.size} bytes)")
+                // Keep WebSocket open - game may send more data which we'll just ignore
+                return
+            }
+
+            // Game server connection: establish TCP to TGW and send rewritten handshake
+            try {
+                val tcpSocket = Socket()
+                tcpSocket.soTimeout = 60000
+                tcpSocket.connect(InetSocketAddress(targetHost, targetPort), 15000)
+                Log.d(TAG, "TCP connected to $targetHost:$targetPort for game connection")
+                toastMessage = "TCP connected to $targetHost:$targetPort"
+
+                // Rewrite Host header
+                val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
+                val rewrittenBytes = rewritten.toByteArray(Charsets.UTF_8)
+                Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
+
+                tcpSocket.getOutputStream().write(rewrittenBytes)
+                tcpSocket.getOutputStream().flush()
+
+                val bridge = TcpBridge(conn, tcpSocket)
+                connections.add(bridge)
+                executor.submit { bridge.readTcpToWs() }
+                Log.d(TAG, "Game bridge established on port $listenPort")
+            } catch (e: Exception) {
+                Log.e(TAG, "TCP failed for game connection: ${e.message}")
+                conn.close(1014, "TCP connect failed: ${e.message}")
+            }
+            return
+        }
+
+        // Subsequent messages: forward to existing TCP bridge
         val bridge = connections.find { it.ws == conn }
         if (bridge != null) {
             try {
-                var bytes = ByteArray(message.remaining())
-                message.get(bytes)
-                Log.d(TAG, "WS->TCP on port $listenPort: ${bytes.size} bytes, first 20: ${bytes.take(20).map { String.format("%02x", it) }.joinToString(" ")}")
-
-                // Intercept TGW handshake and rewrite Host header
-                if (tgwZone != null && bytes.size >= 4 && bytes[0] == 't'.code.toByte() && bytes[1] == 'g'.code.toByte() && bytes[2] == 'w'.code.toByte()) {
-                    val original = String(bytes, Charsets.UTF_8)
-                    Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
-
-                    if (original.contains("stat.")) {
-                        // Stats connection: don't forward to TGW, send fake TGW ok response
-                        // Real TGW response: 28 bytes starting with 95 27 ... ending with "ok"
-                        Log.d(TAG, "Stats connection - sending fake TGW ok response")
-                        val fakeTgwResponse = byteArrayOf(
-                            0x95.toByte(), 0x27.toByte(), 0x00.toByte(), 0x00.toByte(),
-                            0x00.toByte(), 0x01.toByte(), 0x00.toByte(), 0x02.toByte(),
-                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
-                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
-                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x08.toByte(),
-                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
-                            0x02.toByte(), 0x6f.toByte(), 0x6b.toByte() // "ok"
-                        )
-                        conn.send(fakeTgwResponse)
-                        Log.d(TAG, "Fake TGW ok sent (${fakeTgwResponse.size} bytes)")
-                        // Keep TCP connection open but don't forward - game will send data
-                        // which we'll just discard
-                        return
-                    }
-
-                    // Game server connection: rewrite Host header
-                    val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
-                    bytes = rewritten.toByteArray(Charsets.UTF_8)
-                    Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
-                }
-
                 bridge.tcpOutputStream.write(bytes)
                 bridge.tcpOutputStream.flush()
             } catch (e: Exception) {
                 Log.e(TAG, "TCP write error on port $listenPort: ${e.message}")
                 conn.close(1011, "TCP write error")
             }
+        } else {
+            // No TCP bridge (stats connection) - just ignore data
+            Log.d(TAG, "No TCP bridge, ignoring ${bytes.size} bytes (stats data)")
         }
     }
 
