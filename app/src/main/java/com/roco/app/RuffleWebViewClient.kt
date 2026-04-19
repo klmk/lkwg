@@ -368,6 +368,48 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
 
     override fun onPageFinished(view: WebView?, url: String?) {
         debug("Page finished: $url")
+        // Inject rUri:// handler on login page
+        // QQ login uses rUri:// custom scheme which WebView doesn't handle
+        if (url != null && url.contains("17roco.qq.com") && (url.contains("login") || url.contains("default"))) {
+            view?.evaluateJavascript("""
+                (function() {
+                    // Intercept rUri:// navigation and convert to https://
+                    var origAssign = window.location.assign;
+                    var origReplace = window.location.replace;
+                    var origHref = Object.getOwnPropertyDescriptor(window.location, 'href');
+                    
+                    function convertRUri(url) {
+                        if (typeof url === 'string' && url.startsWith('rUri://')) {
+                            console.log('[RUFFLE] Converting rUri:// -> https:// : ' + url);
+                            return url.replace('rUri://', 'https://');
+                        }
+                        return url;
+                    }
+                    
+                    // Override location.href setter
+                    if (origHref && origHref.set) {
+                        Object.defineProperty(window.location, 'href', {
+                            set: function(val) {
+                                origHref.set.call(window.location, convertRUri(val));
+                            },
+                            get: origHref.get
+                        });
+                    }
+                    
+                    // Override location.assign
+                    window.location.assign = function(url) {
+                        origAssign.call(window.location, convertRUri(url));
+                    };
+                    
+                    // Override location.replace
+                    window.location.replace = function(url) {
+                        origReplace.call(window.location, convertRUri(url));
+                    };
+                    
+                    console.log('[RUFFLE] rUri:// interceptor installed');
+                })();
+            """.trimIndent(), null)
+        }
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
