@@ -141,7 +141,14 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             if (response != null) return response
         }
 
-        // 4. Proxy ALL cross-origin resource requests at network level
+        // 4. Intercept login3 response to extract angel_key and redirect properly
+        //    login3 runs inside an iframe, its window.location.href only affects the iframe
+        //    We need to intercept the response, extract cookies, and redirect the top-level page
+        if (urlStr.contains("fcgi-bin/login3")) {
+            return interceptLogin3(urlStr)
+        }
+
+        // 5. Proxy ALL cross-origin resource requests at network level
         if (isResourceDomain(urlStr)) {
             val reqOrigin = request.requestHeaders?.get("Origin")
                 ?: request.requestHeaders?.get("origin")
@@ -289,6 +296,102 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 ByteArrayInputStream(modifiedHtml.toByteArray(Charsets.UTF_8)))
         } catch (e: Exception) {
             debug("❌ Error injecting rUri for $urlStr: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Intercept login3 CGI response.
+     * login3 runs inside an iframe (the OAuth login iframe in login.html).
+     * Its response sets cookies (including angel_key) and does window.location.href.
+     * But since it's in an iframe, the redirect only affects the iframe, not the parent.
+     *
+     * Strategy: Fetch login3 ourselves, extract the response, and return a modified
+     * response that notifies the parent window to navigate to the correct URL.
+     */
+    private fun interceptLogin3(urlStr: String): WebResourceResponse? {
+        return try {
+            debug("Intercepting login3: $urlStr")
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("User-Agent", Constants.DESKTOP_USER_AGENT)
+            conn.setRequestProperty("Accept", "*/*")
+            conn.setRequestProperty("Referer", "https://17roco.qq.com/logintarget.html")
+
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                debug("login3 HTTP ${conn.responseCode}")
+                conn.disconnect()
+                return null
+            }
+
+            // Read response body
+            val body = conn.inputStream.bufferedReader().readText()
+
+            // Collect Set-Cookie headers and set them via CookieManager
+            val setCookies = conn.headerFields?.get("Set-Cookie") ?: emptyList()
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            for (cookie in setCookies) {
+                // Set-Cookie format: "name=value; PATH=/; DOMAIN=..."
+                val cookieValue = cookie.substringBefore(";")
+                val url = urlStr
+                cookieManager.setCookie(url, cookieValue)
+                debug("login3 Set-Cookie: $cookieValue")
+            }
+            cookieManager.flush()
+            conn.disconnect()
+
+            debug("login3 response: ${body.take(300)}")
+            debug("login3 Set-Cookie count: ${setCookies.size}")
+
+            // Extract redirect URL from response: window.location.href="//17roco.qq.com/..."
+            val hrefMatch = Regex("""window\.location\.href\s*=\s*["']([^"']+)["']""").find(body)
+            val redirectUrl = hrefMatch?.groupValues?.get(1)
+
+            // Extract Set-Cookie headers (login3 sets angel_key, platfrom_src, etc.)
+            // Cookies are set by the server via Set-Cookie header, WebView handles them automatically
+
+            if (redirectUrl != null) {
+                // Return a response that tells the parent window to navigate
+                val fullRedirect = if (redirectUrl.startsWith("//")) "https:$redirectUrl" else redirectUrl
+                debug("login3 redirect detected: $fullRedirect")
+                debug("login3 wants to redirect to: $fullRedirect")
+
+                // Return JS that notifies parent to navigate
+                // If we're in an iframe, use parent.location or top.location
+                val jsResponse = """
+                    <html><body><script>
+                    try {
+                        // Check if we have angel_key cookie (means login3 succeeded)
+                        var hasAngelKey = document.cookie.indexOf('angel_key') >= 0;
+                        console.log('[LOGIN3] hasAngelKey=' + hasAngelKey + ' redirect=' + '$fullRedirect');
+
+                        if (hasAngelKey) {
+                            // Login succeeded! Navigate the top-level window to default.html
+                            top.location.href = '$fullRedirect';
+                        } else {
+                            // Login failed (system busy), stay on login page
+                            top.location.href = '//17roco.qq.com/login.html';
+                        }
+                    } catch(e) {
+                        console.log('[LOGIN3] Error: ' + e.message);
+                        // If top access fails, try parent
+                        try { parent.location.href = '$fullRedirect'; } catch(e2) {}
+                    }
+                    </script></body></html>
+                """.trimIndent()
+
+                WebResourceResponse("text/html", "UTF-8",
+                    ByteArrayInputStream(jsResponse.toByteArray(Charsets.UTF_8)))
+            } else {
+                // No redirect found, return original response
+                WebResourceResponse("text/html", "UTF-8",
+                    ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)))
+            }
+        } catch (e: Exception) {
+            debug("❌ Error intercepting login3: ${e.message}")
             null
         }
     }
