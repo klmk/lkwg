@@ -62,7 +62,7 @@ class SocketProxyServer(
             // Inject TGW L7 forward command if zone is specified
             if (tgwZone != null) {
                 val tgwCommand = "tgw_l7_forward\r\nHost: $tgwZone.17roco.qq.com:$targetPort\r\n\r\n"
-                Log.d(TAG, "Injecting TGW command: $tgwCommand.trim().replace("\r", "\\r")")
+                Log.d(TAG, "Injecting TGW command for $tgwZone")
                 tcpSocket.getOutputStream().write(tgwCommand.toByteArray(Charsets.UTF_8))
                 tcpSocket.getOutputStream().flush()
 
