@@ -98,8 +98,27 @@ class SocketProxyServer(
                     val original = String(bytes, Charsets.UTF_8)
                     Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
 
-                    // Rewrite Host header for ALL connections (stats + game)
-                    // TGW doesn't care about the specific hostname, it routes based on zone
+                    if (original.contains("stat.")) {
+                        // Stats connection: don't forward to TGW, send fake TGW ok response
+                        // Real TGW response: 28 bytes starting with 95 27 ... ending with "ok"
+                        Log.d(TAG, "Stats connection - sending fake TGW ok response")
+                        val fakeTgwResponse = byteArrayOf(
+                            0x95.toByte(), 0x27.toByte(), 0x00.toByte(), 0x00.toByte(),
+                            0x00.toByte(), 0x01.toByte(), 0x00.toByte(), 0x02.toByte(),
+                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
+                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
+                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x08.toByte(),
+                            0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
+                            0x02.toByte(), 0x6f.toByte(), 0x6b.toByte() // "ok"
+                        )
+                        conn.send(fakeTgwResponse)
+                        Log.d(TAG, "Fake TGW ok sent (${fakeTgwResponse.size} bytes)")
+                        // Keep TCP connection open but don't forward - game will send data
+                        // which we'll just discard
+                        return
+                    }
+
+                    // Game server connection: rewrite Host header
                     val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
                     bytes = rewritten.toByteArray(Charsets.UTF_8)
                     Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
