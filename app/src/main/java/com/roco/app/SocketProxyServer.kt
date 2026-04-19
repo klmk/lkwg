@@ -89,9 +89,22 @@ class SocketProxyServer(
         val bridge = connections.find { it.ws == conn }
         if (bridge != null) {
             try {
-                val bytes = ByteArray(message.remaining())
+                var bytes = ByteArray(message.remaining())
                 message.get(bytes)
                 Log.d(TAG, "WS->TCP on port $listenPort: ${bytes.size} bytes, first 20: ${bytes.take(20).map { String.format("%02x", it) }.joinToString(" ")}")
+
+                // Intercept TGW handshake and rewrite Host header
+                // Game sends: "tgw_l7_forward\r\nHost: 172.25.40.120:9000\r\n\r\n"
+                // TGW expects: "tgw_l7_forward\r\nHost: zone5.17roco.qq.com:443\r\n\r\n"
+                if (tgwZone != null && bytes.size >= 4 && bytes[0] == 't'.code.toByte() && bytes[1] == 'g'.code.toByte() && bytes[2] == 'w'.code.toByte()) {
+                    val original = String(bytes, Charsets.UTF_8)
+                    Log.d(TAG, "Intercepted TGW command: $original")
+                    // Replace the Host header value
+                    val rewritten = original.replaceFirst(Regex("Host: [^\r\n]+"), "Host: $tgwZone.17roco.qq.com:$targetPort")
+                    bytes = rewritten.toByteArray(Charsets.UTF_8)
+                    Log.d(TAG, "Rewritten TGW command: $rewritten")
+                }
+
                 bridge.tcpOutputStream.write(bytes)
                 bridge.tcpOutputStream.flush()
             } catch (e: Exception) {
