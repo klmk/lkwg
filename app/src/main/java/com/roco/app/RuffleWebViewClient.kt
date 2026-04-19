@@ -321,6 +321,24 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             conn.setRequestProperty("Accept", "*/*")
             conn.setRequestProperty("Referer", "https://17roco.qq.com/logintarget.html")
 
+            // Pass all cookies from WebView to login3 request
+            // login3 needs QQ login cookies to validate the OAuth code
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            val cookies = mutableSetOf<String>()
+            // Get cookies for the login3 domain
+            cookieManager.getCookie(urlStr)?.let { cookies.add(it) }
+            // Also get cookies for qq.com (QQ login state)
+            cookieManager.getCookie("https://qq.com")?.let { cookies.add(it) }
+            // And for graph.qq.com (OAuth domain)
+            cookieManager.getCookie("https://graph.qq.com")?.let { cookies.add(it) }
+            // And for 17roco.qq.com
+            cookieManager.getCookie("https://17roco.qq.com")?.let { cookies.add(it) }
+            val cookieStr = cookies.filter { it.isNotEmpty() }.joinToString("; ")
+            if (cookieStr.isNotEmpty()) {
+                conn.setRequestProperty("Cookie", cookieStr)
+                debug("login3 cookies: ${cookieStr.take(300)}")
+            }
+
             if (conn.responseCode != HttpURLConnection.HTTP_OK) {
                 debug("login3 HTTP ${conn.responseCode}")
                 conn.disconnect()
