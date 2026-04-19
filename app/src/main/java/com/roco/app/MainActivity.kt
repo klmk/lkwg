@@ -41,7 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "RocoApp"
-        private const val TARGET_URL = "https://17roco.qq.com/default.html"
+        private const val TARGET_URL = "https://17roco.qq.com/iframe.html"
 
         // Socket proxy routes: local port -> TGW public gateway -> game server
         // 洛克王国使用腾讯 TGW 网关，公网玩家通过 TGW 访问内网游戏服务器
