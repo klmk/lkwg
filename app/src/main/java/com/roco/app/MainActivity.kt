@@ -49,11 +49,13 @@ class MainActivity : AppCompatActivity() {
         data class ProxyRoute(val listenPort: Int, val targetHost: String, val targetPort: Int, val tgwZone: String?)
 
         private val PROXY_ROUTES = listOf(
-            ProxyRoute(9000, "140.206.161.119", 443, "zone5"),    // 频道 1-50
-            ProxyRoute(9100, "140.206.161.119", 443, "zone5"),
-            ProxyRoute(9101, "140.206.161.119", 443, "zone5"),
-            ProxyRoute(19000, "140.206.161.253", 443, "zone6"),   // 频道 51-100
-            ProxyRoute(19001, "140.206.161.253", 443, "zone6"),
+            // Connect to TGW gateway (stat.17roco.qq.com:9000), NOT directly to game server IP:443
+            // TGW handles the tunneling to the actual game server (zone5/zone6.17roco.qq.com:443)
+            ProxyRoute(9000, "stat.17roco.qq.com", 9000, "zone5"),    // 频道 1-50
+            ProxyRoute(9100, "stat.17roco.qq.com", 9000, "zone5"),
+            ProxyRoute(9101, "stat.17roco.qq.com", 9000, "zone5"),
+            ProxyRoute(19000, "stat.17roco.qq.com", 9000, "zone6"),   // 频道 51-100
+            ProxyRoute(19001, "stat.17roco.qq.com", 9000, "zone6"),
         )
     }
 
