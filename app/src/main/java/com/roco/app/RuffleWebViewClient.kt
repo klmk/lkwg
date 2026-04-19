@@ -217,11 +217,34 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
     }
 
     private fun injectRuffleScripts(html: String): String {
+        // Inject rUri:// interceptor BEFORE everything else (at start of <head>)
+        // QQ login uses rUri:// custom scheme which WebView doesn't handle
+        val rUriInterceptor = """<script>
+(function(){
+  function fixUri(u){return typeof u==='string'&&u.indexOf('rUri://')===0?u.replace('rUri://','https://'):u;}
+  try{
+    var d=Object.getOwnPropertyDescriptor(window.location,'href');
+    if(d&&d.set)Object.defineProperty(window.location,'href',{set:function(v){d.set.call(this,fixUri(v));},get:d.get,configurable:true});
+  }catch(e){}
+  var oa=window.location.assign;window.location.assign=function(u){oa.call(this,fixUri(u));};
+  var or=window.location.replace;window.location.replace=function(u){or.call(this,fixUri(u));};
+  console.log('[RUFFLE] rUri interceptor ready');
+})();
+</script>
+"""
+        val headOpen = html.lowercase().indexOf("<head")
         val headClose = html.lowercase().indexOf("</head>")
         return if (headClose != -1) {
-            html.substring(0, headClose) + ruffleInjection + html.substring(headClose)
+            val insertPoint = if (headOpen != -1) {
+                // Find end of <head> tag
+                val tagEnd = html.indexOf(">", headOpen)
+                if (tagEnd != -1 && tagEnd < headClose) tagEnd + 1 else headClose
+            } else {
+                headClose
+            }
+            html.substring(0, insertPoint) + rUriInterceptor + ruffleInjection + html.substring(insertPoint)
         } else {
-            ruffleInjection + html
+            rUriInterceptor + ruffleInjection + html
         }
     }
 
@@ -368,48 +391,6 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
 
     override fun onPageFinished(view: WebView?, url: String?) {
         debug("Page finished: $url")
-        // Inject rUri:// handler on login page
-        // QQ login uses rUri:// custom scheme which WebView doesn't handle
-        if (url != null && url.contains("17roco.qq.com") && (url.contains("login") || url.contains("default"))) {
-            view?.evaluateJavascript("""
-                (function() {
-                    // Intercept rUri:// navigation and convert to https://
-                    var origAssign = window.location.assign;
-                    var origReplace = window.location.replace;
-                    var origHref = Object.getOwnPropertyDescriptor(window.location, 'href');
-                    
-                    function convertRUri(url) {
-                        if (typeof url === 'string' && url.startsWith('rUri://')) {
-                            console.log('[RUFFLE] Converting rUri:// -> https:// : ' + url);
-                            return url.replace('rUri://', 'https://');
-                        }
-                        return url;
-                    }
-                    
-                    // Override location.href setter
-                    if (origHref && origHref.set) {
-                        Object.defineProperty(window.location, 'href', {
-                            set: function(val) {
-                                origHref.set.call(window.location, convertRUri(val));
-                            },
-                            get: origHref.get
-                        });
-                    }
-                    
-                    // Override location.assign
-                    window.location.assign = function(url) {
-                        origAssign.call(window.location, convertRUri(url));
-                    };
-                    
-                    // Override location.replace
-                    window.location.replace = function(url) {
-                        origReplace.call(window.location, convertRUri(url));
-                    };
-                    
-                    console.log('[RUFFLE] rUri:// interceptor installed');
-                })();
-            """.trimIndent(), null)
-        }
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
