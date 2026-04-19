@@ -122,8 +122,13 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
         }
 
         // 3. Intercept HTML pages from 17roco domains for Ruffle injection
-        //    Skip CGI/API requests (they return non-HTML content)
-        if (isRocoDomain(urlStr) && !injectedUrls.contains(urlStr) && isHtmlPage(urlStr)) {
+        //    Only inject into pages that actually contain SWF content
+        //    Skip login/iframe/utility pages that don't need Ruffle
+        if (isRocoDomain(urlStr) && !injectedUrls.contains(urlStr) && isHtmlPage(urlStr)
+            && !urlStr.contains("iframe.html")
+            && !urlStr.contains("logintarget.html")
+            && !urlStr.contains("login.html")
+            && !urlStr.contains("fcgi-bin/login")) {
             val response = downloadAndInjectHtml(urlStr)
             if (response != null) return response
         }
