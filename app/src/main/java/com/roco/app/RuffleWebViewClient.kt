@@ -144,7 +144,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
         // 4. Intercept login3 response to extract angel_key and redirect properly
         //    login3 runs inside an iframe, its window.location.href only affects the iframe
         //    We need to intercept the response, extract cookies, and redirect the top-level page
-        if (urlStr.contains("fcgi-bin/login3")) {
+        if (urlStr.contains("web2.17roco.qq.com/fcgi-bin/login3")) {
             return interceptLogin3(urlStr)
         }
 
@@ -343,19 +343,20 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             cookieManager.flush()
             conn.disconnect()
 
-            debug("login3 response: ${body.take(300)}")
+            debug("login3 response: ${body.take(500)}")
             debug("login3 Set-Cookie count: ${setCookies.size}")
+            val hasAngelKey = setCookies.any { it.contains("angel_key") }
+            debug("login3 has angel_key: $hasAngelKey")
 
             // Extract redirect URL from response: window.location.href="//17roco.qq.com/..."
             val hrefMatch = Regex("""window\.location\.href\s*=\s*["']([^"']+)["']""").find(body)
             val redirectUrl = hrefMatch?.groupValues?.get(1)
+            debug("login3 redirect: ${redirectUrl ?: "none"}")
 
-            // Extract Set-Cookie headers (login3 sets angel_key, platfrom_src, etc.)
-            // Cookies are set by the server via Set-Cookie header, WebView handles them automatically
-
-            if (redirectUrl != null) {
-                // Return a response that tells the parent window to navigate
+            if (hasAngelKey && redirectUrl != null) {
+                // Login succeeded! Navigate the top-level window
                 val fullRedirect = if (redirectUrl.startsWith("//")) "https:$redirectUrl" else redirectUrl
+                debug("login3 SUCCESS! Redirecting top to: $fullRedirect")
                 debug("login3 redirect detected: $fullRedirect")
                 debug("login3 wants to redirect to: $fullRedirect")
 
@@ -386,7 +387,9 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 WebResourceResponse("text/html", "UTF-8",
                     ByteArrayInputStream(jsResponse.toByteArray(Charsets.UTF_8)))
             } else {
-                // No redirect found, return original response
+                // No angel_key or no redirect - login3 failed
+                // Return original response so the iframe can handle it normally
+                debug("login3 FAILED (no angel_key or no redirect), returning original response")
                 WebResourceResponse("text/html", "UTF-8",
                     ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)))
             }
