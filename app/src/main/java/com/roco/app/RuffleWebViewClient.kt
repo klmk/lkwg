@@ -610,6 +610,30 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 })();
             """.trimIndent(), null)
             debug("Injected rUri interceptor via evaluateJavascript for $url")
+
+            // CRITICAL FIX: login3's main005.js expects parent.document.getElementById("mainiframe")
+            // to exist. It sets mainiframe.src = "default.html?..." to load the game.
+            // Since login.html runs in the main window (not inside iframe.html),
+            // we need to create a hidden mainiframe that will load the game.
+            view?.evaluateJavascript("""
+                (function(){
+                  if (!document.getElementById('mainiframe')) {
+                    var iframe = document.createElement('iframe');
+                    iframe.id = 'mainiframe';
+                    iframe.name = 'mainiframe';
+                    iframe.style.width = '100%';
+                    iframe.style.height = '100%';
+                    iframe.style.border = 'none';
+                    iframe.style.position = 'fixed';
+                    iframe.style.top = '0';
+                    iframe.style.left = '0';
+                    iframe.style.zIndex = '9999';
+                    document.body.appendChild(iframe);
+                    console.log('[RUFFLE] Created mainiframe for login3 game loading');
+                  }
+                })();
+            """.trimIndent(), null)
+            debug("Injected mainiframe element for login3 compatibility")
         }
     }
 
