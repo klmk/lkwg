@@ -133,6 +133,14 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             if (response != null) return response
         }
 
+        // 3b. For login.html: inject only rUri interceptor (no Ruffle)
+        //     QQ login uses rUri:// scheme which WebView doesn't handle
+        if (isRocoDomain(urlStr) && !injectedUrls.contains(urlStr) && isHtmlPage(urlStr)
+            && (urlStr.contains("login.html") || urlStr.contains("logintarget.html"))) {
+            val response = downloadAndInjectRuriOnly(urlStr)
+            if (response != null) return response
+        }
+
         // 4. Proxy ALL cross-origin resource requests at network level
         if (isResourceDomain(urlStr)) {
             val reqOrigin = request.requestHeaders?.get("Origin")
@@ -217,6 +225,70 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 ByteArrayInputStream(modifiedHtml.toByteArray(Charsets.UTF_8)))
         } catch (e: Exception) {
             debug("❌ Error injecting HTML for $urlStr: ${e.message}")
+            null
+        }
+    }
+
+    private fun downloadAndInjectRuriOnly(urlStr: String): WebResourceResponse? {
+        return try {
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", Constants.DESKTOP_USER_AGENT)
+            conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            conn.setRequestProperty("Accept-Encoding", "identity")
+            if (urlStr.contains("17roco.qq.com")) {
+                conn.setRequestProperty("Referer", "https://17roco.qq.com/")
+            }
+
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                conn.disconnect()
+                return null
+            }
+
+            var charset = parseCharset(conn.contentType ?: "") ?: "gb2312"
+            val htmlBytes = conn.inputStream.readBytes()
+            conn.disconnect()
+
+            val htmlString = String(htmlBytes, Charset.forName(charset))
+            val detectedCharset = detectCharsetFromMeta(htmlString)
+            val finalHtml = if (detectedCharset != null && detectedCharset != charset) {
+                String(htmlBytes, Charset.forName(detectedCharset))
+            } else {
+                htmlString
+            }
+
+            // Inject only rUri interceptor, no Ruffle
+            val rUriScript = """<script>
+(function(){
+  function fixUri(u){return typeof u==='string'&&u.indexOf('rUri://')===0?u.replace('rUri://','https://'):u;}
+  try{
+    var d=Object.getOwnPropertyDescriptor(window.location,'href');
+    if(d&&d.set)Object.defineProperty(window.location,'href',{set:function(v){d.set.call(this,fixUri(v));},get:d.get,configurable:true});
+  }catch(e){}
+  var oa=window.location.assign;window.location.assign=function(u){oa.call(this,fixUri(u));};
+  var or=window.location.replace;window.location.replace=function(u){or.call(this,fixUri(u));};
+  console.log('[RUFFLE] rUri interceptor ready');
+})();
+</script>
+"""
+            val headClose = finalHtml.lowercase().indexOf("</head>")
+            val modifiedHtml = if (headClose != -1) {
+                finalHtml.substring(0, headClose) + rUriScript + finalHtml.substring(headClose)
+            } else {
+                rUriScript + finalHtml
+            }
+
+            injectedUrls.add(urlStr)
+            debug("Injected rUri-only into $urlStr (${htmlBytes.size} bytes)")
+
+            WebResourceResponse("text/html", "UTF-8",
+                ByteArrayInputStream(modifiedHtml.toByteArray(Charsets.UTF_8)))
+        } catch (e: Exception) {
+            debug("❌ Error injecting rUri for $urlStr: ${e.message}")
             null
         }
     }
