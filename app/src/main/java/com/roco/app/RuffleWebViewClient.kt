@@ -360,7 +360,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             cookieManager.flush()
             conn.disconnect()
 
-            debug("login3 response: ${body.take(500)}")
+            debug("login3 response (${body.length} chars): ${body}")
             debug("login3 Set-Cookie count: ${setCookies.size}")
             val hasAngelKey = setCookies.any { it.contains("angel_key") }
             debug("login3 has angel_key: $hasAngelKey")
