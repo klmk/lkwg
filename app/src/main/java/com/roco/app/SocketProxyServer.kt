@@ -59,36 +59,9 @@ class SocketProxyServer(
             Log.d(TAG, "TCP connected to $targetHost:$targetPort")
             toastMessage = "TCP connected to $targetHost:$targetPort"
 
-            // Inject TGW L7 forward command if zone is specified
-            if (tgwZone != null) {
-                val tgwCommand = "tgw_l7_forward\r\nHost: $tgwZone.17roco.qq.com:$targetPort\r\n\r\n"
-                Log.d(TAG, "Injecting TGW command for $tgwZone")
-                tcpSocket.getOutputStream().write(tgwCommand.toByteArray(Charsets.UTF_8))
-                tcpSocket.getOutputStream().flush()
-
-                // Read TGW response (typically a short acknowledgment)
-                // Wait a moment for TGW to process
-                Thread.sleep(200)
-
-                // Try to read any TGW response data
-                val tgwResponse = ByteArray(1024)
-                tcpSocket.soTimeout = 2000
-                try {
-                    val bytesRead = tcpSocket.getInputStream().read(tgwResponse)
-                    if (bytesRead > 0) {
-                        val response = String(tgwResponse, 0, bytesRead, Charsets.UTF_8)
-                        Log.d(TAG, "TGW response ($bytesRead bytes): ${response.take(100)}")
-                        // Send TGW response back to Ruffle so it knows connection is established
-                        conn?.send(tgwResponse.copyOfRange(0, bytesRead))
-                    }
-                } catch (e: SocketTimeoutException) {
-                    Log.d(TAG, "TGW response timeout (may be normal)")
-                }
-                // Restore normal timeout
-                tcpSocket.soTimeout = 60000
-                Log.d(TAG, "TGW handshake completed for $tgwZone")
-                toastMessage = "TGW $tgwZone connected"
-            }
+            // NOTE: Do NOT inject TGW handshake here!
+            // The game SWF already sends TGW L7 forward command itself.
+            // We just need to connect to the TGW public IP and let the game handle the handshake.
 
             val bridge = TcpBridge(conn!!, tcpSocket)
             connections.add(bridge)
