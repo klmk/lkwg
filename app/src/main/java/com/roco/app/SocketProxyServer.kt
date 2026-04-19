@@ -98,14 +98,8 @@ class SocketProxyServer(
                     val original = String(bytes, Charsets.UTF_8)
                     Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
 
-                    // Check if this is a stats connection (not game server)
-                    if (original.contains("stat.")) {
-                        Log.d(TAG, "Stats connection detected, closing to let game continue")
-                        bridge.close()
-                        return
-                    }
-
-                    // Rewrite Host header for game server connections
+                    // Rewrite Host header for ALL connections (stats + game)
+                    // TGW doesn't care about the specific hostname, it routes based on zone
                     val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
                     bytes = rewritten.toByteArray(Charsets.UTF_8)
                     Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
