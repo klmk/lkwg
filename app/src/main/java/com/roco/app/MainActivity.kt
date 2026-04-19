@@ -43,14 +43,17 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "RocoApp"
         private const val TARGET_URL = "https://17roco.qq.com/default.html"
 
-        // Socket proxy mappings: listenPort -> targetHost:targetPort
-        // Socket proxy routes: local port -> target game server
+        // Socket proxy routes: local port -> TGW public gateway -> game server
+        // 洛克王国使用腾讯 TGW 网关，公网玩家通过 TGW 访问内网游戏服务器
+        // SocketProxy 会自动注入 TGW L7 forward 握手指令
+        data class ProxyRoute(val listenPort: Int, val targetHost: String, val targetPort: Int, val tgwZone: String?)
+
         private val PROXY_ROUTES = listOf(
-            Triple(9000, "172.25.40.120", 9000),
-            Triple(9100, "172.25.40.120", 9100),
-            Triple(9101, "172.25.40.120", 9101),
-            Triple(19000, "172.25.40.121", 9000),
-            Triple(19001, "172.25.40.122", 9000),
+            ProxyRoute(9000, "140.206.161.119", 443, "zone5"),    // 频道 1-50
+            ProxyRoute(9100, "140.206.161.119", 443, "zone5"),
+            ProxyRoute(9101, "140.206.161.119", 443, "zone5"),
+            ProxyRoute(19000, "140.206.161.253", 443, "zone6"),   // 频道 51-100
+            ProxyRoute(19001, "140.206.161.253", 443, "zone6"),
         )
     }
 
@@ -96,18 +99,18 @@ class MainActivity : AppCompatActivity() {
 
         // Start socket proxy FIRST
         Log.d(TAG, "=== Starting SocketProxy servers ===")
-        for ((listenPort, targetHost, targetPort) in PROXY_ROUTES) {
+        for (route in PROXY_ROUTES) {
             try {
-                Log.d(TAG, "Starting proxy :$listenPort -> $targetHost:$targetPort")
-                val proxy = SocketProxyServer(listenPort, targetHost, targetPort)
+                Log.d(TAG, "Starting proxy :${route.listenPort} -> ${route.targetHost}:${route.targetPort} TGW=${route.tgwZone}")
+                val proxy = SocketProxyServer(route.listenPort, route.targetHost, route.targetPort, route.tgwZone)
                 proxy.isReuseAddr = true
                 proxy.start()
                 socketProxies.add(proxy)
-                addDebugLine("✅ Proxy :$listenPort -> $targetHost:$targetPort started")
-                Log.d(TAG, "Proxy :$listenPort started OK")
+                addDebugLine("✅ Proxy :${route.listenPort} -> ${route.targetHost}:${route.targetPort} (${route.tgwZone}) started")
+                Log.d(TAG, "Proxy :${route.listenPort} started OK")
             } catch (e: Exception) {
-                addDebugLine("❌ Proxy :$listenPort failed: ${e.javaClass.simpleName}: ${e.message}")
-                Log.e(TAG, "Proxy :$listenPort FAILED", e)
+                addDebugLine("❌ Proxy :${route.listenPort} failed: ${e.javaClass.simpleName}: ${e.message}")
+                Log.e(TAG, "Proxy :${route.listenPort} FAILED", e)
             }
         }
         Log.d(TAG, "=== SocketProxy servers done ===")
