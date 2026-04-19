@@ -141,12 +141,10 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             if (response != null) return response
         }
 
-        // 4. Intercept login3 response to extract angel_key and redirect properly
-        //    login3 runs inside an iframe, its window.location.href only affects the iframe
-        //    We need to intercept the response, extract cookies, and redirect the top-level page
-        if (urlStr.contains("web2.17roco.qq.com/fcgi-bin/login3")) {
-            return interceptLogin3(urlStr)
-        }
+        // 4. Do NOT intercept login3 - let it load normally
+        //    login3 returns a full game page HTML (with SWF), not a redirect
+        //    It handles iframe detection internally (window.top!=window.self)
+        //    If we intercept it, the game page can't load properly
 
         // 5. Proxy ALL cross-origin resource requests at network level
         if (isResourceDomain(urlStr)) {
