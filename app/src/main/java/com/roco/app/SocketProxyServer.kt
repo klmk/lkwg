@@ -74,26 +74,9 @@ class SocketProxyServer(
             val original = String(bytes, Charsets.UTF_8)
             Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
 
-            if (original.contains("stat.")) {
-                // Stats connection: send fake TGW ok response, NO TCP connection needed
-                Log.d(TAG, "Stats connection - sending fake TGW ok response (no TCP)")
-                val fakeTgwResponse = byteArrayOf(
-                    0x95.toByte(), 0x27.toByte(), 0x00.toByte(), 0x00.toByte(),
-                    0x00.toByte(), 0x01.toByte(), 0x00.toByte(), 0x02.toByte(),
-                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
-                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
-                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x08.toByte(),
-                    0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
-                    0x02.toByte(), 0x6f.toByte(), 0x6b.toByte() // "ok"
-                )
-                conn.send(fakeTgwResponse)
-                Log.d(TAG, "Fake TGW ok sent (${fakeTgwResponse.size} bytes)")
-                // Keep WebSocket open - game may send more data which we'll just ignore
-                return
-            }
-
-            // Game server connection: establish TCP to TGW and send rewritten handshake
-            try {
+            // All connections: establish TCP to TGW and send rewritten handshake
+                // (Both stats and game connections go through TGW)
+                try {
                 val tcpSocket = Socket()
                 tcpSocket.soTimeout = 60000
                 tcpSocket.connect(InetSocketAddress(targetHost, targetPort), 15000)

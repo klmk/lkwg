@@ -374,6 +374,15 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
         val url = request.url.toString()
         // Block /__ruffle/ navigation
         if (url.contains("/__ruffle/")) return true
+        // Handle rUri:// scheme - convert to https://
+        // QQ login uses rUri:// as custom scheme for redirects
+        // WebView doesn't handle it properly, causing redirectURI mismatch
+        if (url.startsWith("rUri://")) {
+            val httpsUrl = url.replace("rUri://", "https://")
+            debug("Redirecting rUri:// -> $httpsUrl")
+            view?.loadUrl(httpsUrl)
+            return true
+        }
         return false
     }
 }
