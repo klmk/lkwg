@@ -141,10 +141,14 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             if (response != null) return response
         }
 
-        // 4. Do NOT intercept login3 - let it load normally
-        //    login3 returns a full game page HTML (with SWF), not a redirect
-        //    It handles iframe detection internally (window.top!=window.self)
-        //    If we intercept it, the game page can't load properly
+        // 4. Intercept login3 HTML response to break out of iframe
+        //    login3 returns a game page, but it runs inside an OAuth iframe.
+        //    Its main005.js tries parent.document.getElementById("mainiframe") which
+        //    fails due to cross-origin (web2.17roco.qq.com vs 17roco.qq.com).
+        //    Fix: inject JS at the start to redirect to top window if in iframe.
+        if (urlStr.contains("web2.17roco.qq.com/fcgi-bin/login3")) {
+            return interceptLogin3Breakout(urlStr)
+        }
 
         // 5. Proxy ALL cross-origin resource requests at network level
         if (isResourceDomain(urlStr)) {
@@ -294,6 +298,84 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 ByteArrayInputStream(modifiedHtml.toByteArray(Charsets.UTF_8)))
         } catch (e: Exception) {
             debug("❌ Error injecting rUri for $urlStr: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Intercept login3 response to break out of iframe.
+     * login3 returns a game page HTML that runs inside an OAuth iframe.
+     * Its main005.js needs to access parent.document.getElementById("mainiframe")
+     * but this fails due to cross-origin (web2.17roco.qq.com vs 17roco.qq.com).
+     *
+     * Fix: inject a script at the very start that detects iframe and redirects
+     * the top window to the same login3 URL (so it loads in the main window).
+     */
+    private fun interceptLogin3Breakout(urlStr: String): WebResourceResponse? {
+        return try {
+            debug("Intercepting login3 breakout: $urlStr")
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("User-Agent", Constants.DESKTOP_USER_AGENT)
+            conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            conn.setRequestProperty("Referer", "https://17roco.qq.com/logintarget.html")
+
+            // Pass all cookies
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            val cookies = mutableSetOf<String>()
+            cookieManager.getCookie(urlStr)?.let { cookies.add(it) }
+            cookieManager.getCookie("https://qq.com")?.let { cookies.add(it) }
+            cookieManager.getCookie("https://graph.qq.com")?.let { cookies.add(it) }
+            cookieManager.getCookie("https://17roco.qq.com")?.let { cookies.add(it) }
+            val cookieStr = cookies.filter { it.isNotEmpty() }.joinToString("; ")
+            if (cookieStr.isNotEmpty()) {
+                conn.setRequestProperty("Cookie", cookieStr)
+            }
+
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                debug("login3 breakout HTTP ${conn.responseCode}")
+                conn.disconnect()
+                return null
+            }
+
+            val body = conn.inputStream.bufferedReader().readText()
+
+            // Collect Set-Cookie headers
+            val setCookies = conn.headerFields?.get("Set-Cookie") ?: emptyList()
+            for (cookie in setCookies) {
+                val cookieValue = cookie.substringBefore(";")
+                cookieManager.setCookie(urlStr, cookieValue)
+            }
+            cookieManager.flush()
+            conn.disconnect()
+
+            debug("login3 breakout response: ${body.length} chars, ${setCookies.size} cookies")
+
+            // Instead of breaking out of iframe, patch the JS to work without mainiframe.
+            // main005.js does: parent.document.getElementById("mainiframe").src = parent.frameurl;
+            // Replace with: top.location.href = frameurl; (works even without mainiframe)
+            var modifiedBody = body
+                .replace(
+                    "parent.document.getElementById(\"mainiframe\").src=parent.frameurl",
+                    "top.location.href=frameurl"
+                )
+                .replace(
+                    "parent.document.getElementById(\"mainiframe\").src=parent.frameurl;",
+                    "top.location.href=frameurl;"
+                )
+
+            // Also inject Ruffle scripts since login3 returns a game page with SWF
+            modifiedBody = injectRuffleScripts(modifiedBody)
+
+            debug("login3 breakout: patched mainiframe refs and injected Ruffle")
+
+            WebResourceResponse("text/html", "UTF-8",
+                ByteArrayInputStream(modifiedBody.toByteArray(Charsets.UTF_8)))
+        } catch (e: Exception) {
+            debug("❌ Error in login3 breakout: ${e.message}")
             null
         }
     }
@@ -648,6 +730,15 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             val httpsUrl = url.replace("rUri://", "https://")
             debug("Redirecting rUri:// -> $httpsUrl")
             view?.loadUrl(httpsUrl)
+            return true
+        }
+        // CRITICAL: When login3 loads inside an iframe, its main005.js tries to access
+        // parent.document.getElementById("mainiframe") which fails due to cross-origin.
+        // Instead, intercept login3 navigation and load it in the main window.
+        // login3 returns a full game page with SWF, so it needs Ruffle injection.
+        if (url.contains("web2.17roco.qq.com/fcgi-bin/login3") && request.isForMainFrame) {
+            debug("Intercepting login3 navigation, loading in main window: $url")
+            view?.loadUrl(url)
             return true
         }
         return false
