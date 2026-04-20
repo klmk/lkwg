@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">Roco Flash</string>
+    <string name="app_name">Roco Flash Shadow</string>
+    <string name="debug_title">Shadow Debug Info</string>
 </resources>

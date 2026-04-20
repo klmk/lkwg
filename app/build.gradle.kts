@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "com.roco.app"
+    namespace = "com.roco.shadow"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.roco.app"
+        applicationId = "com.roco.app.shadow"
         minSdk = 21
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0-shadow"
     }
 
     buildTypes {

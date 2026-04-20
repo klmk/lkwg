@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RocoApp"
+rootProject.name = "LkwgShadow"
 include(":app")
