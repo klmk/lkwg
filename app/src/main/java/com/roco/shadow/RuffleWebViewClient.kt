@@ -32,8 +32,9 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
     }
 
     // Ruffle injection script
-    // Uses urlRewriteRules to redirect SWF internal requests through /__proxy/
-    // so shouldInterceptRequest can proxy them (bypasses CORS + keeps original URL for SWF)
+    // NOTE:
+    // Some mobile networks reset TLS when Java HttpURLConnection fetches res.17roco.qq.com.
+    // Keep Ruffle resource URLs as original hosts so Chromium/WebView handles networking.
     private val ruffleInjection: String
         get() {
             return "<script>\n" +
@@ -49,10 +50,7 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
                 "  \"upgradeToHttps\": true,\n" +
                 "  \"logLevel\": \"Debug\",\n" +
                 "  \"credentialAllowList\": [\"https://res.17roco.qq.com\", \"https://web2.17roco.qq.com\", \"https://17roco.qq.com\"],\n" +
-                "  \"urlRewriteRules\": [\n" +
-                "    [\"^//res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"],\n" +
-                "    [\"^https://res\\\\.17roco\\\\.qq\\\\.com/\", \"/__proxy/https://res.17roco.qq.com/\"]\n" +
-                "  ],\n" +
+                "  \"urlRewriteRules\": [],\n" +
                 "  \"socketProxy\": [\n" +
                 "    {\"host\": \"172.25.40.120\", \"port\": 9000, \"proxyUrl\": \"ws://127.0.0.1:9000\"},\n" +
                 "    {\"host\": \"172.25.40.120\", \"port\": 9100, \"proxyUrl\": \"ws://127.0.0.1:9100\"},\n" +
@@ -150,12 +148,11 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             return interceptLogin3Breakout(urlStr)
         }
 
-        // 5. Proxy ALL cross-origin resource requests at network level
+        // 5. Let WebView handle cross-origin resource networking directly.
+        //    On some CN mobile networks, Java HttpURLConnection gets TLS reset while
+        //    Chromium networking path remains usable for the same host.
         if (isResourceDomain(urlStr)) {
-            val reqOrigin = request.requestHeaders?.get("Origin")
-                ?: request.requestHeaders?.get("origin")
-                ?: "https://17roco.qq.com"
-            return proxyRequest(urlStr, reqOrigin)
+            return null
         }
 
         return null
