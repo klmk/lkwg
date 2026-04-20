@@ -1,4 +1,6 @@
-# 洛克王国 Android 客户端
+# 洛克王国 Android 客户端（Shadow 副本）
+
+> 这是用于并行开发的隔离副本版本，应用标识与展示名称已和主项目区分。
 
 基于 [Ruffle](https://ruffle.rs/) 开源 Flash 引擎，在 Android WebView 中运行洛克王国网页游戏。
 
