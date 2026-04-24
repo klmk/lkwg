@@ -13,6 +13,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.util.concurrent.TimeUnit
 
 /**
@@ -32,6 +33,49 @@ class SocketProxyServer(
 
     companion object {
         private const val TAG = "SocketProxy"
+
+        /** Get the local address of the WiFi interface to bind TCP sockets */
+        private fun getWifiLocalAddress(): InetAddress? {
+            try {
+                val interfaces = NetworkInterface.getNetworkInterfaces()
+                while (interfaces.hasMoreElements()) {
+                    val ni = interfaces.nextElement()
+                    // Skip loopback, point-to-point (tunnel), and down interfaces
+                    if (ni.isLoopback || ni.isPointToPoint || !ni.isUp) continue
+                    val name = ni.name.lowercase()
+                    // Prefer wlan0 (standard WiFi interface on Android)
+                    if (name == "wlan0" || name.startsWith("wlan")) {
+                        val addresses = ni.inetAddresses
+                        while (addresses.hasMoreElements()) {
+                            val addr = addresses.nextElement()
+                            // Use IPv4 only
+                            if (addr.hostAddress?.contains(".") == true) {
+                                Log.d(TAG, "Using WiFi interface ${ni.name} address: ${addr.hostAddress}")
+                                return addr
+                            }
+                        }
+                    }
+                }
+                // Fallback: find any non-loopback IPv4 interface that is not point-to-point
+                val interfaces2 = NetworkInterface.getNetworkInterfaces()
+                while (interfaces2.hasMoreElements()) {
+                    val ni = interfaces2.nextElement()
+                    if (ni.isLoopback || ni.isPointToPoint || !ni.isUp) continue
+                    val addresses = ni.inetAddresses
+                    while (addresses.hasMoreElements()) {
+                        val addr = addresses.nextElement()
+                        if (addr.hostAddress?.contains(".") == true) {
+                            Log.d(TAG, "Fallback interface ${ni.name} address: ${addr.hostAddress}")
+                            return addr
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to get WiFi address: ${e.message}")
+            }
+            Log.w(TAG, "No suitable network interface found, using default routing")
+            return null
+        }
     }
 
     private val connections = CopyOnWriteArrayList<TcpBridge>()
@@ -88,6 +132,12 @@ class SocketProxyServer(
                     val socket = Socket()
                     socket.soTimeout = 60000
                     socket.reuseAddress = true
+                    // Bind to WiFi interface to avoid traffic going through other interfaces
+                    val localAddr = getWifiLocalAddress()
+                    if (localAddr != null) {
+                        socket.bind(InetSocketAddress(localAddr, 0))
+                        Log.d(TAG, "TCP bound to ${localAddr.hostAddress}")
+                    }
                     socket.connect(InetSocketAddress(targetHost, targetPort), tcpConnectTimeout)
                     tcpSocket = socket
                     Log.d(TAG, "TCP connected to $targetHost:$targetPort (attempt $attempt)")
