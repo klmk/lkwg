@@ -12,6 +12,8 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.net.InetAddress
+import java.util.concurrent.TimeUnit
 
 /**
  * Local WebSocket-to-TCP proxy server with TGW (Tencent Gateway) support.
@@ -35,6 +37,8 @@ class SocketProxyServer(
     private val connections = CopyOnWriteArrayList<TcpBridge>()
     private val executor = Executors.newCachedThreadPool()
     private var toastMessage: String? = null
+    private var tcpRetryCount = 3
+    private var tcpConnectTimeout = 10000
 
     fun setToastMessage(msg: String) {
         toastMessage = msg
@@ -74,31 +78,49 @@ class SocketProxyServer(
             val original = String(bytes, Charsets.UTF_8)
             Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
 
-            // All connections: establish TCP to TGW and send rewritten handshake
-                // (Both stats and game connections go through TGW)
+            // All connections: establish TCP to TGW with retry
+            // (Both stats and game connections go through TGW)
+            var tcpSocket: Socket? = null
+            var lastError: Exception? = null
+            for (attempt in 1..tcpRetryCount) {
                 try {
-                val tcpSocket = Socket()
-                tcpSocket.soTimeout = 60000
-                tcpSocket.connect(InetSocketAddress(targetHost, targetPort), 15000)
-                Log.d(TAG, "TCP connected to $targetHost:$targetPort for game connection")
-                toastMessage = "TCP connected to $targetHost:$targetPort"
-
-                // Rewrite Host header
-                val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
-                val rewrittenBytes = rewritten.toByteArray(Charsets.UTF_8)
-                Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
-
-                tcpSocket.getOutputStream().write(rewrittenBytes)
-                tcpSocket.getOutputStream().flush()
-
-                val bridge = TcpBridge(conn, tcpSocket)
-                connections.add(bridge)
-                executor.submit { bridge.readTcpToWs() }
-                Log.d(TAG, "Game bridge established on port $listenPort")
-            } catch (e: Exception) {
-                Log.e(TAG, "TCP failed for game connection: ${e.message}")
-                conn.close(1014, "TCP connect failed: ${e.message}")
+                    Log.d(TAG, "TCP connect attempt $attempt/$tcpRetryCount to $targetHost:$targetPort")
+                    val socket = Socket()
+                    socket.soTimeout = 60000
+                    socket.reuseAddress = true
+                    socket.connect(InetSocketAddress(targetHost, targetPort), tcpConnectTimeout)
+                    tcpSocket = socket
+                    Log.d(TAG, "TCP connected to $targetHost:$targetPort (attempt $attempt)")
+                    toastMessage = "TCP connected to $targetHost:$targetPort"
+                    lastError = null
+                    break
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(TAG, "TCP connect attempt $attempt/$tcpRetryCount failed: ${e.message}")
+                    if (attempt < tcpRetryCount) {
+                        try { Thread.sleep(1000) } catch (_: InterruptedException) {}
+                    }
+                }
             }
+
+            if (tcpSocket == null) {
+                Log.e(TAG, "TCP failed after $tcpRetryCount attempts: ${lastError?.message}")
+                conn.close(1014, "TCP connect failed: ${lastError?.message}")
+                return
+            }
+
+            // Rewrite Host header
+            val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
+            val rewrittenBytes = rewritten.toByteArray(Charsets.UTF_8)
+            Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
+
+            tcpSocket.getOutputStream().write(rewrittenBytes)
+            tcpSocket.getOutputStream().flush()
+
+            val bridge = TcpBridge(conn, tcpSocket)
+            connections.add(bridge)
+            executor.submit { bridge.readTcpToWs() }
+            Log.d(TAG, "Game bridge established on port $listenPort")
             return
         }
 

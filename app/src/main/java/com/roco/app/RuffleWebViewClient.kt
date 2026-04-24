@@ -150,7 +150,15 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             return interceptLogin3Breakout(urlStr)
         }
 
-        // 5. Proxy ALL cross-origin resource requests at network level
+        // 5. Block QQ security component requests (localhost.ptlogin2.qq.com, localhost.sec.qq.com)
+        //    These are QQ PC client security services, not available in WebView
+        //    Returning empty response prevents ERR_CONNECTION_REFUSED errors
+        if (urlStr.contains("localhost.ptlogin2.qq.com") || urlStr.contains("localhost.sec.qq.com")) {
+            debug("Blocked QQ security request: $urlStr")
+            return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream("".toByteArray()))
+        }
+
+        // 6. Proxy ALL cross-origin resource requests at network level
         if (isResourceDomain(urlStr)) {
             val reqOrigin = request.requestHeaders?.get("Origin")
                 ?: request.requestHeaders?.get("origin")
@@ -370,10 +378,61 @@ class RuffleWebViewClient(private val context: Context, private val debugLogger:
             // Also inject Ruffle scripts since login3 returns a game page with SWF
             modifiedBody = injectRuffleScripts(modifiedBody)
 
-            debug("login3 breakout: patched mainiframe refs and injected Ruffle")
+            // Inject WebSocket reconnect handler for SocketProxy stability
+            val wsReconnectScript = """<script>
+(function(){
+  console.log('[WS-RECONNECT] Installing WebSocket reconnect handler');
+  var OrigWebSocket = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    var ws;
+    var reconnectAttempts = 0;
+    var maxReconnects = 3;
+    var reconnectDelay = 2000;
+    
+    function createWS() {
+      try {
+        ws = protocols ? new OrigWebSocket(url, protocols) : new OrigWebSocket(url);
+        ws.addEventListener('error', function(e) {
+          console.log('[WS-RECONNECT] WebSocket error on ' + url + ', attempt=' + reconnectAttempts);
+          if (reconnectAttempts < maxReconnects) {
+            reconnectAttempts++;
+            console.log('[WS-RECONNECT] Reconnecting in ' + reconnectDelay + 'ms (attempt ' + reconnectAttempts + '/' + maxReconnects + ')');
+            setTimeout(createWS, reconnectDelay);
+            reconnectDelay *= 2;
+          } else {
+            console.log('[WS-RECONNECT] Max reconnect attempts reached for ' + url);
+          }
+        });
+        ws.addEventListener('close', function(e) {
+          if (e.code !== 1000 && reconnectAttempts < maxReconnects) {
+            console.log('[WS-RECONNECT] WebSocket closed unexpectedly code=' + e.code + ', reconnecting...');
+            reconnectAttempts++;
+            setTimeout(createWS, reconnectDelay);
+            reconnectDelay *= 2;
+          }
+        });
+        return ws;
+      } catch(ex) {
+        console.log('[WS-RECONNECT] Failed to create WebSocket: ' + ex.message);
+        return null;
+      }
+    }
+    return createWS();
+  };
+  window.WebSocket.prototype = OrigWebSocket.prototype;
+  window.WebSocket.CONNECTING = OrigWebSocket.CONNECTING;
+  window.WebSocket.OPEN = OrigWebSocket.OPEN;
+  window.WebSocket.CLOSING = OrigWebSocket.CLOSING;
+  window.WebSocket.CLOSED = OrigWebSocket.CLOSED;
+  console.log('[WS-RECONNECT] Handler installed');
+})();
+</script>
+"""
+
+            debug("login3 breakout: patched mainiframe refs and injected Ruffle + WS reconnect")
 
             WebResourceResponse("text/html", "UTF-8",
-                ByteArrayInputStream(modifiedBody.toByteArray(Charsets.UTF_8)))
+                ByteArrayInputStream((modifiedBody + wsReconnectScript).toByteArray(Charsets.UTF_8)))
         } catch (e: Exception) {
             debug("❌ Error in login3 breakout: ${e.message}")
             null
