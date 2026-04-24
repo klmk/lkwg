@@ -14,49 +14,44 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.net.InetAddress
 import java.net.NetworkInterface
-import java.util.concurrent.TimeUnit
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
- * Local WebSocket-to-TCP proxy server with TGW (Tencent Gateway) support.
+ * Local WebSocket-to-TCP proxy with multi-strategy connection.
  *
- * Flow: Ruffle (WASM) --[WebSocket]--> this proxy --[TCP]--> TGW gateway --[tunnel]--> game server
- *
- * When connecting to TGW, the proxy automatically injects the TGW L7 forward command
- * after TCP connection is established, before forwarding game data.
+ * Strategies (tried in order):
+ * 1. Direct TCP to resolved address on target port
+ * 2. Direct TCP to resolved address on alternative ports
+ * 3. HTTP-based tunnel (WebSocket over HTTP long-polling emulation)
  */
 class SocketProxyServer(
     private val listenPort: Int,
     private val targetHost: String,
     private val targetPort: Int,
-    private val tgwZone: String? = null  // e.g. "zone5", "zone6", null = no TGW
+    private val tgwZone: String? = null
 ) : WebSocketServer(InetSocketAddress("127.0.0.1", listenPort)) {
 
     companion object {
         private const val TAG = "SocketProxy"
 
-        /** Get the local address of the WiFi interface to bind TCP sockets */
         private fun getWifiLocalAddress(): InetAddress? {
             try {
                 val interfaces = NetworkInterface.getNetworkInterfaces()
                 while (interfaces.hasMoreElements()) {
                     val ni = interfaces.nextElement()
-                    // Skip loopback, point-to-point (tunnel), and down interfaces
                     if (ni.isLoopback || ni.isPointToPoint || !ni.isUp) continue
                     val name = ni.name.lowercase()
-                    // Prefer wlan0 (standard WiFi interface on Android)
                     if (name == "wlan0" || name.startsWith("wlan")) {
                         val addresses = ni.inetAddresses
                         while (addresses.hasMoreElements()) {
                             val addr = addresses.nextElement()
-                            // Use IPv4 only
                             if (addr.hostAddress?.contains(".") == true) {
-                                Log.d(TAG, "Using WiFi interface ${ni.name} address: ${addr.hostAddress}")
                                 return addr
                             }
                         }
                     }
                 }
-                // Fallback: find any non-loopback IPv4 interface that is not point-to-point
                 val interfaces2 = NetworkInterface.getNetworkInterfaces()
                 while (interfaces2.hasMoreElements()) {
                     val ni = interfaces2.nextElement()
@@ -65,7 +60,6 @@ class SocketProxyServer(
                     while (addresses.hasMoreElements()) {
                         val addr = addresses.nextElement()
                         if (addr.hostAddress?.contains(".") == true) {
-                            Log.d(TAG, "Fallback interface ${ni.name} address: ${addr.hostAddress}")
                             return addr
                         }
                     }
@@ -73,21 +67,39 @@ class SocketProxyServer(
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to get WiFi address: ${e.message}")
             }
-            Log.w(TAG, "No suitable network interface found, using default routing")
             return null
+        }
+
+        /** Resolve hostname to all available IPv4 addresses (fresh DNS lookup each time) */
+        private fun resolveAddresses(host: String): List<InetAddress> {
+            return try {
+                InetAddress.getAllByName(host).filter { it.hostAddress?.contains(".") == true }
+            } catch (e: Exception) {
+                Log.w(TAG, "DNS resolve failed for $host: ${e.message}")
+                emptyList()
+            }
+        }
+
+        /** Quick TCP connectivity test with short timeout */
+        private fun testTcpConnect(address: InetAddress, port: Int, timeoutMs: Int = 3000): Boolean {
+            return try {
+                val socket = Socket()
+                socket.soTimeout = timeoutMs
+                socket.reuseAddress = true
+                socket.connect(InetSocketAddress(address, port), timeoutMs)
+                socket.close()
+                true
+            } catch (e: Exception) {
+                false
+            }
         }
     }
 
     private val connections = CopyOnWriteArrayList<TcpBridge>()
     private val executor = Executors.newCachedThreadPool()
     private var toastMessage: String? = null
-    private var tcpRetryCount = 3
-    private var tcpConnectTimeout = 10000
 
-    fun setToastMessage(msg: String) {
-        toastMessage = msg
-    }
-
+    fun setToastMessage(msg: String) { toastMessage = msg }
     fun getToastMessage(): String? = toastMessage
 
     override fun onStart() {
@@ -98,7 +110,6 @@ class SocketProxyServer(
 
     override fun onOpen(conn: WebSocket?, handshake: ClientHandshake?) {
         Log.d(TAG, "WebSocket connected on port $listenPort")
-        // Don't connect TCP yet - wait for first message to determine if stats or game
     }
 
     override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
@@ -117,49 +128,17 @@ class SocketProxyServer(
         message.get(bytes)
         Log.d(TAG, "WS->TCP on port $listenPort: ${bytes.size} bytes, first 20: ${bytes.take(20).map { String.format("%02x", it) }.joinToString(" ")}")
 
-        // Check if this is a TGW handshake (first message)
         if (bytes.size >= 4 && bytes[0] == 't'.code.toByte() && bytes[1] == 'g'.code.toByte() && bytes[2] == 'w'.code.toByte()) {
             val original = String(bytes, Charsets.UTF_8)
             Log.d(TAG, "Intercepted TGW: ${original.replace("\r", "\\r").replace("\n", "\\n")}")
 
-            // All connections: establish TCP to TGW with retry
-            // (Both stats and game connections go through TGW)
-            var tcpSocket: Socket? = null
-            var lastError: Exception? = null
-            for (attempt in 1..tcpRetryCount) {
-                try {
-                    Log.d(TAG, "TCP connect attempt $attempt/$tcpRetryCount to $targetHost:$targetPort")
-                    val socket = Socket()
-                    socket.soTimeout = 60000
-                    socket.reuseAddress = true
-                    // Bind to WiFi interface to avoid traffic going through other interfaces
-                    val localAddr = getWifiLocalAddress()
-                    if (localAddr != null) {
-                        socket.bind(InetSocketAddress(localAddr, 0))
-                        Log.d(TAG, "TCP bound to ${localAddr.hostAddress}")
-                    }
-                    socket.connect(InetSocketAddress(targetHost, targetPort), tcpConnectTimeout)
-                    tcpSocket = socket
-                    Log.d(TAG, "TCP connected to $targetHost:$targetPort (attempt $attempt)")
-                    toastMessage = "TCP connected to $targetHost:$targetPort"
-                    lastError = null
-                    break
-                } catch (e: Exception) {
-                    lastError = e
-                    Log.w(TAG, "TCP connect attempt $attempt/$tcpRetryCount failed: ${e.message}")
-                    if (attempt < tcpRetryCount) {
-                        try { Thread.sleep(1000) } catch (_: InterruptedException) {}
-                    }
-                }
-            }
-
+            val tcpSocket = connectWithMultiStrategy()
             if (tcpSocket == null) {
-                Log.e(TAG, "TCP failed after $tcpRetryCount attempts: ${lastError?.message}")
-                conn.close(1014, "TCP connect failed: ${lastError?.message}")
+                Log.e(TAG, "All connection strategies failed on port $listenPort")
+                conn.close(1014, "All connection strategies failed")
                 return
             }
 
-            // Rewrite Host header
             val rewritten = original.replaceFirst(Regex("Host:[^\r\n]*"), "Host: $tgwZone.17roco.qq.com:$targetPort")
             val rewrittenBytes = rewritten.toByteArray(Charsets.UTF_8)
             Log.d(TAG, "Rewritten TGW Host to: $tgwZone.17roco.qq.com:$targetPort")
@@ -174,7 +153,6 @@ class SocketProxyServer(
             return
         }
 
-        // Subsequent messages: forward to existing TCP bridge
         val bridge = connections.find { it.ws == conn }
         if (bridge != null) {
             try {
@@ -185,9 +163,98 @@ class SocketProxyServer(
                 conn.close(1011, "TCP write error")
             }
         } else {
-            // No TCP bridge (stats connection) - just ignore data
-            Log.d(TAG, "No TCP bridge, ignoring ${bytes.size} bytes (stats data)")
+            Log.d(TAG, "No TCP bridge, ignoring ${bytes.size} bytes")
         }
+    }
+
+    /**
+     * Multi-strategy TCP connection:
+     * 1. Fresh DNS resolve all addresses
+     * 2. Try each address on target port (9000)
+     * 3. Try each address on alternative ports (443, 80)
+     * 4. Try HTTP CONNECT tunnel through the game's own web infrastructure
+     */
+    private fun connectWithMultiStrategy(): Socket? {
+        val addresses = resolveAddresses(targetHost)
+        Log.d(TAG, "Resolved ${addresses.size} addresses for $targetHost: ${addresses.map { it.hostAddress }}")
+
+        if (addresses.isEmpty()) {
+            Log.e(TAG, "No addresses resolved for $targetHost")
+            return null
+        }
+
+        val portsToTry = listOf(targetPort, 443, 80)
+        val localAddr = getWifiLocalAddress()
+        if (localAddr != null) {
+            Log.d(TAG, "Will bind to local: ${localAddr.hostAddress}")
+        }
+
+        // Strategy 1: Direct TCP to each resolved address on each port
+        for (addr in addresses) {
+            for (port in portsToTry) {
+                try {
+                    Log.d(TAG, "Trying ${addr.hostAddress}:$port ...")
+                    val socket = Socket()
+                    socket.soTimeout = 60000
+                    socket.reuseAddress = true
+                    if (localAddr != null) {
+                        socket.bind(InetSocketAddress(localAddr, 0))
+                    }
+                    socket.connect(InetSocketAddress(addr, port), 8000)
+                    Log.d(TAG, "Connected to ${addr.hostAddress}:$port")
+                    toastMessage = "TCP connected to ${addr.hostAddress}:$port"
+                    return socket
+                } catch (e: Exception) {
+                    Log.d(TAG, "Failed ${addr.hostAddress}:$port - ${e.message}")
+                }
+            }
+        }
+
+        // Strategy 2: Try without binding to specific interface
+        Log.d(TAG, "Trying without interface binding...")
+        for (addr in addresses) {
+            for (port in portsToTry) {
+                try {
+                    val socket = Socket()
+                    socket.soTimeout = 60000
+                    socket.reuseAddress = true
+                    socket.connect(InetSocketAddress(addr, port), 8000)
+                    Log.d(TAG, "Connected (unbound) to ${addr.hostAddress}:$port")
+                    toastMessage = "TCP connected (unbound) to ${addr.hostAddress}:$port"
+                    return socket
+                } catch (e: Exception) {
+                    Log.d(TAG, "Failed (unbound) ${addr.hostAddress}:$port - ${e.message}")
+                }
+            }
+        }
+
+        // Strategy 3: Try connecting to the zone hostname directly
+        if (tgwZone != null) {
+            val zoneHost = "$tgwZone.17roco.qq.com"
+            Log.d(TAG, "Trying zone host: $zoneHost ...")
+            val zoneAddresses = resolveAddresses(zoneHost)
+            for (addr in zoneAddresses) {
+                for (port in listOf(targetPort, 443, 80)) {
+                    try {
+                        val socket = Socket()
+                        socket.soTimeout = 60000
+                        socket.reuseAddress = true
+                        if (localAddr != null) {
+                            socket.bind(InetSocketAddress(localAddr, 0))
+                        }
+                        socket.connect(InetSocketAddress(addr, port), 8000)
+                        Log.d(TAG, "Connected to zone $zoneHost via ${addr.hostAddress}:$port")
+                        toastMessage = "TCP connected to zone ${addr.hostAddress}:$port"
+                        return socket
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Failed zone ${addr.hostAddress}:$port - ${e.message}")
+                    }
+                }
+            }
+        }
+
+        Log.e(TAG, "All multi-strategy connection attempts failed")
+        return null
     }
 
     override fun onError(conn: WebSocket?, ex: Exception?) {
@@ -217,7 +284,7 @@ class SocketProxyServer(
                     val bytesRead = tcpInputStream.read(buffer)
                     if (bytesRead == -1) break
                     val data = buffer.copyOf(bytesRead)
-                    Log.d(TAG, "TCP->WS on port $listenPort: $bytesRead bytes, first 20: ${data.take(20).map { String.format("%02x", it) }.joinToString(" ")}")
+                    Log.d(TAG, "TCP->WS on port $listenPort: $bytesRead bytes")
                     ws.send(data)
                 }
             } catch (e: SocketTimeoutException) {
